@@ -212,3 +212,13 @@ Možné výsledky:
 - `error`.
 
 Hodnota správce nebo skupiny se nesmí automaticky použít jako hodnota konkrétního fondu.
+
+## Grounded textové balíčky
+
+Pro pole ve stavu `not_found`, `ambiguous`, `conflicting` nebo `error` lze vytvořit omezený balíček relevantních úseků již stažených dokumentů.
+
+```powershell
+uv run fundscraper build-grounding-packets `
+    --limit 10 `
+    --max-snippets 8
+```

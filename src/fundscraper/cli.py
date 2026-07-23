@@ -59,6 +59,12 @@ from fundscraper.fallback_sources import (
 from fundscraper.fetch_service import (
     fetch_fund_start_page,
 )
+from fundscraper.grounding_packets import (
+    GroundingBatchReport,
+    GroundingPacketError,
+    build_grounding_packets,
+    write_grounding_packets,
+)
 from fundscraper.html_discovery import (
     HtmlDiscoveryError,
 )
@@ -1582,3 +1588,132 @@ def inspect_adapter_command(
 
     for warning in result.warnings:
         typer.echo(f"- {warning}")
+
+
+@app.command("build-grounding-packets")
+def build_grounding_packets_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    enriched_output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output-data",
+            help="Enriched fund output JSON.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.enriched.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    report_path: Annotated[
+        Path,
+        typer.Option(
+            "--report",
+            help="Grounding packet output JSON.",
+            dir_okay=False,
+        ),
+    ] = Path("reports/grounding-packets.json"),
+    limit: Annotated[
+        int | None,
+        typer.Option(
+            "--limit",
+            min=1,
+            max=230,
+            help="Maximum number of input funds to inspect.",
+        ),
+    ] = None,
+    offset: Annotated[
+        int,
+        typer.Option(
+            "--offset",
+            min=0,
+            help="Number of input funds to skip.",
+        ),
+    ] = 0,
+    max_snippets: Annotated[
+        int,
+        typer.Option(
+            "--max-snippets",
+            min=1,
+            max=30,
+            help="Maximum snippets per unresolved field.",
+        ),
+    ] = 8,
+) -> None:
+    """Create grounded evidence packets for unresolved fields."""
+
+    report: GroundingBatchReport
+
+    try:
+        funds = load_funds(input_path)
+
+        if offset >= len(funds):
+            typer.echo(
+                f"Grounding offset is outside the input fund list: {offset} >= {len(funds)}",
+                err=True,
+            )
+
+            raise typer.Exit(code=1)
+
+        selected_funds = funds[offset:] if limit is None else funds[offset : offset + limit]
+
+        outputs = load_output(enriched_output_path)
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        report = build_grounding_packets(
+            funds=selected_funds,
+            outputs=outputs,
+            database_path=database_path,
+            max_snippets=max_snippets,
+        )
+
+        write_grounding_packets(
+            report=report,
+            path=report_path,
+        )
+
+    except (
+        InputFileError,
+        OutputFileError,
+        DatabaseError,
+        GroundingPacketError,
+        ValueError,
+    ) as exc:
+        typer.echo(
+            f"Grounding packet creation failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Funds considered: {report.funds_considered}")
+
+    typer.echo(f"Funds with packets: {report.funds_with_packets}")
+
+    typer.echo(f"Packets total: {report.packets_total}")
+
+    typer.echo(f"Packets with context: {report.packets_with_context}")
+
+    typer.echo(f"Packets without context: {report.packets_without_context}")
+
+    typer.echo(f"Report file: {report_path}")

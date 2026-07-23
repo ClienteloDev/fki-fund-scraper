@@ -313,3 +313,26 @@ def test_inspect_adapter_reports_missing_fund(
     assert result.exit_code == 1
 
     assert "Fund was not found:" in result.output
+
+
+def test_build_grounding_packets_rejects_invalid_offset(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "funds.json"
+
+    write_input(input_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "build-grounding-packets",
+            "--input",
+            str(input_path),
+            "--offset",
+            "100",
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert "Grounding offset is outside" in result.output

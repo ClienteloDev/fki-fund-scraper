@@ -55,3 +55,7 @@ Weby správců s více fondy vyžadují identifikaci přesné fund-level sekce. 
 ## Scope a konflikty
 
 Kandidátní hodnoty jsou kontrolovány proti identitě fondu. Text popisující správce, skupinu nebo více fondů je označen jako `ambiguous`. Rozdílné hodnoty ze stejně důvěryhodných fund-level zdrojů jsou označeny jako `conflicting`. AUM z různých dat není automaticky konflikt; preferuje se aktuálnější hodnota.
+
+## Grounded fallback
+
+LLM fallback nesmí prohledávat vlastní znalosti ani volný internet. Nejprve vznikne omezený grounding packet z již získaných dokumentů. Obsahuje citace, URL, typ dokumentu a číslo stránky. Pokud packet nemá použitelný text, pole zůstává nenalezené a pokračuje na source fallback.
