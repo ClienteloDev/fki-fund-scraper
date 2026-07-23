@@ -36,6 +36,12 @@ from fundscraper.document_service import (
     DocumentParsingSummary,
     parse_fund_documents,
 )
+from fundscraper.domain_adapters.base import (
+    DomainAdapterResult,
+)
+from fundscraper.domain_adapters.registry import (
+    get_domain_adapter,
+)
 from fundscraper.extraction_service import (
     ExtractionServiceError,
     ExtractionSummary,
@@ -1112,6 +1118,8 @@ def run_fund_command(
 
     typer.echo(f"Fund: {result.fund_name}")
 
+    typer.echo(f"Domain adapter: {result.adapter_name or '-'}")
+
     typer.echo(f"Status: {result.status.value}")
 
     typer.echo(f"Pages visited: {result.pages_visited}")
@@ -1465,3 +1473,112 @@ def plan_fallbacks_command(
     typer.echo(f"Approved sources: {len(approved_sources)}")
 
     typer.echo(f"Report file: {report_path}")
+
+
+@app.command("inspect-adapter")
+def inspect_adapter_command(
+    fund_name: Annotated[
+        str,
+        typer.Argument(
+            help="Exact fund name from funds.json.",
+        ),
+    ],
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+        ),
+    ] = False,
+) -> None:
+    """Inspect domain-specific discovery without running extraction."""
+
+    result: DomainAdapterResult
+
+    try:
+        funds = load_funds(input_path)
+
+        matching_funds = [fund for fund in funds if (fund.name.casefold() == fund_name.casefold())]
+
+        if not matching_funds:
+            typer.echo(
+                f"Fund was not found: {fund_name}",
+                err=True,
+            )
+
+            raise typer.Exit(code=1)
+
+        fund = matching_funds[0]
+
+        adapter = get_domain_adapter(fund)
+
+        if adapter is None:
+            typer.echo(
+                f"No domain adapter supports: {fund.web}",
+                err=True,
+            )
+
+            raise typer.Exit(code=1)
+
+        settings = HttpSettings.from_environment()
+
+        async def run_adapter() -> DomainAdapterResult:
+            async with HttpFetcher(
+                settings,
+                cache_directory,
+            ) as fetcher:
+                return await adapter.discover(
+                    fund=fund,
+                    fetcher=fetcher,
+                    force=force,
+                )
+
+        result = asyncio.run(run_adapter())
+    except (
+        InputFileError,
+        ConfigurationError,
+        FetchError,
+    ) as exc:
+        typer.echo(
+            f"Adapter inspection failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Fund: {fund.name}")
+
+    typer.echo(f"Adapter: {result.adapter_name}")
+
+    typer.echo(f"Navigation URLs: {len(result.navigation_urls)}")
+
+    for url in result.navigation_urls:
+        typer.echo(f"- {url}")
+
+    typer.echo(f"Documents: {len(result.documents)}")
+
+    for document in result.documents:
+        typer.echo("")
+        typer.echo(f"- [{document.score}] {document.document_type.value}")
+        typer.echo(f"  {document.text or '-'}")
+        typer.echo(f"  {document.url}")
+
+    typer.echo(f"Warnings: {len(result.warnings)}")
+
+    for warning in result.warnings:
+        typer.echo(f"- {warning}")

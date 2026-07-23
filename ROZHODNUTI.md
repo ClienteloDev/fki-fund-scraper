@@ -47,3 +47,7 @@ Crawler, parser a extraktory jsou spojeny do jedné sekvenční pipeline. Sekven
 ## Fallbacky
 
 Nenalezená hodnota nevede k neřízenému internetovému hledání. Planner vytváří prioritní posloupnost: rozšířený oficiální crawl, doménový adaptér, OCR, schválený externí zdroj, grounded LLM a manuální kontrola. Externí databáze musí být explicitně uvedena v registru zdrojů.
+
+## Doménové adaptéry
+
+Weby správců s více fondy vyžadují identifikaci přesné fund-level sekce. AVANT adaptér používá centrální katalog, normalizovaný název fondu a nejmenší odpovídající HTML kontejner. Obecné dokumenty správce a nerelevantní korporátní přílohy jsou filtrovány.

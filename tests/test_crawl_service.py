@@ -139,3 +139,89 @@ def test_crawls_pages_and_downloads_documents(
     assert status.funds_total == 1
     assert status.sources_total == 4
     assert status.attempts_total == 8
+
+
+def test_downloads_adapter_seed_document(
+    tmp_path: Path,
+) -> None:
+    from fundscraper.html_discovery import (
+        DiscoveredLink,
+    )
+    from fundscraper.output_models import (
+        DocumentType,
+    )
+
+    fund = FundInput(
+        name="Example SICAV a.s.",
+        web="https://example.com/",
+    )
+
+    database_path = tmp_path / "fundscraper.sqlite3"
+
+    initialize_database(database_path)
+
+    register_funds(
+        database_path,
+        [
+            fund,
+        ],
+    )
+
+    async def handler(
+        request: httpx.Request,
+    ) -> httpx.Response:
+        if request.url.path == "/document.pdf":
+            return httpx.Response(
+                status_code=200,
+                headers={
+                    "Content-Type": "application/pdf",
+                },
+                content=b"%PDF-1.7 adapter document",
+                request=request,
+            )
+
+        return httpx.Response(
+            status_code=200,
+            headers={
+                "Content-Type": "text/html",
+            },
+            content=b"<html><body>Fund</body></html>",
+            request=request,
+        )
+
+    async def run_test() -> None:
+        settings = HttpSettings(
+            max_retries=0,
+            retry_min_wait_seconds=0,
+            retry_max_wait_seconds=0,
+        )
+
+        seed_document = DiscoveredLink(
+            url="https://example.com/document.pdf",
+            text="Klicove informace",
+            score=150,
+            document_type=(DocumentType.PRIIPS_KID),
+            same_domain=True,
+            direct_document=True,
+        )
+
+        async with HttpFetcher(
+            settings,
+            tmp_path / "http",
+            transport=httpx.MockTransport(handler),
+        ) as fetcher:
+            summary = await crawl_fund_site(
+                database_path=database_path,
+                fund=fund,
+                fetcher=fetcher,
+                max_pages=2,
+                max_depth=1,
+                max_documents=5,
+                document_seed_links=(seed_document,),
+            )
+
+        assert summary.documents_discovered == 1
+
+        assert summary.documents_downloaded == 1
+
+    asyncio.run(run_test())

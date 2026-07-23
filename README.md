@@ -171,3 +171,23 @@ Po dokončení sample pipeline lze vytvořit plán dalšího dohledávání:
 uv run fundscraper plan-fallbacks `
     --limit 10
 ```
+
+## Doménové adaptéry
+
+Doménové adaptéry doplňují obecný crawler pro weby, na kterých je více fondů spravováno přes jeden centrální portál.
+
+První adaptér podporuje doménu `avantfunds.cz`. Vyhledá přesnou sekci fondu v centrálním katalogu a předá crawleru:
+
+- stránku konkrétního fondu,
+- PRIIPs KID,
+- výroční zprávy,
+- účetní závěrky,
+- statuty,
+- další relevantní fund-level dokumenty.
+
+Diagnostika adaptéru:
+
+```powershell
+uv run fundscraper inspect-adapter `
+    "AVANT Finance SICAV a. s."
+```

@@ -23,6 +23,12 @@ from fundscraper.document_service import (
     DocumentParsingSummary,
     parse_fund_documents,
 )
+from fundscraper.domain_adapters.base import (
+    DomainAdapterResult,
+)
+from fundscraper.domain_adapters.registry import (
+    get_domain_adapter,
+)
 from fundscraper.extraction_service import (
     ExtractionSummary,
     extract_fund_data,
@@ -46,6 +52,7 @@ from fundscraper.output_service import (
 class FundPipelineResult:
     fund_id: str
     fund_name: str
+    adapter_name: str | None
     status: FundStatus
     pages_visited: int
     documents_discovered: int
@@ -54,11 +61,17 @@ class FundPipelineResult:
     scanned_candidates: int
     fields_found: int
     fields_missing: int
+
     field_statuses: tuple[
         tuple[str, str],
         ...,
     ]
-    failures: tuple[str, ...]
+
+    failures: tuple[
+        str,
+        ...,
+    ]
+
     duration_seconds: float
 
 
@@ -67,7 +80,11 @@ class BatchPipelineSummary:
     started_at: datetime
     finished_at: datetime
     output_path: Path
-    results: tuple[FundPipelineResult, ...]
+
+    results: tuple[
+        FundPipelineResult,
+        ...,
+    ]
 
     @property
     def requested(self) -> int:
@@ -103,9 +120,10 @@ def synchronize_output_file(
     reset: bool = False,
 ) -> None:
     """
-    Synchronize the enriched output with the current input fund list.
+    Synchronize enriched output with the current input fund list.
 
-    Existing results are preserved when their fund IDs still match.
+    Existing results are preserved when their stable fund IDs
+    still exist in the current input.
     """
 
     pending_outputs = create_pending_output(funds)
@@ -150,7 +168,7 @@ async def run_fund_pipeline(
     max_documents: int = 20,
     force: bool = False,
 ) -> FundPipelineResult:
-    """Run crawl, parsing and extraction for one fund."""
+    """Run adapter discovery, crawl, parsing and extraction for one fund."""
 
     started = perf_counter()
 
@@ -163,6 +181,17 @@ async def run_fund_pipeline(
     extraction_summary: ExtractionSummary | None = None
 
     failures: list[str] = []
+
+    adapter_name: str | None = None
+
+    adapter_result = DomainAdapterResult(
+        adapter_name="none",
+        navigation_urls=(),
+        documents=(),
+        warnings=(),
+    )
+
+    adapter = get_domain_adapter(fund)
 
     update_fund_status(
         database_path,
@@ -179,43 +208,66 @@ async def run_fund_pipeline(
     )
 
     try:
-        crawl_summary = await crawl_fund_site(
+        if adapter is not None:
+            adapter_result = await adapter.discover(
+                fund=fund,
+                fetcher=fetcher,
+                force=force,
+            )
+
+            adapter_name = adapter_result.adapter_name
+
+            failures.extend(adapter_result.warnings)
+
+        # This call must remain outside the adapter condition.
+        # Funds without a domain adapter still need to run
+        # through the normal crawler.
+        crawl_result = await crawl_fund_site(
             database_path=database_path,
             fund=fund,
             fetcher=fetcher,
             max_pages=max_pages,
             max_depth=max_depth,
             max_documents=max_documents,
+            navigation_seed_urls=(adapter_result.navigation_urls),
+            document_seed_links=(adapter_result.documents),
             force=force,
         )
 
+        # Keep an optional reference for the exception branch.
+        crawl_summary = crawl_result
+
         failures.extend(
             (f"{failure.stage}: {failure.url}: {failure.error_code}: {failure.message}")
-            for failure in crawl_summary.failures
+            for failure in crawl_result.failures
         )
 
-        parsing_summary = await parse_fund_documents(
+        parsing_result = await parse_fund_documents(
             database_path=database_path,
             fund=fund,
             parsed_directory=parsed_directory,
             force=force,
         )
 
+        parsing_summary = parsing_result
+
         failures.extend(
             (f"parse_document: {failure.url}: {failure.error_code}: {failure.message}")
-            for failure in parsing_summary.failures
+            for failure in parsing_result.failures
         )
 
-        extraction_summary = extract_fund_data(
+        extraction_result = extract_fund_data(
             database_path=database_path,
             output_path=output_path,
             fund=fund,
         )
 
-        failures.extend(extraction_summary.warnings)
+        extraction_summary = extraction_result
+
+        failures.extend(extraction_result.warnings)
 
         final_status = (
-            FundStatus.COMPLETED if extraction_summary.fields_found == 5 else FundStatus.PARTIAL
+            FundStatus.COMPLETED if extraction_result.fields_found == 5 else FundStatus.PARTIAL
         )
 
         update_fund_status(
@@ -235,20 +287,21 @@ async def run_fund_pipeline(
         return FundPipelineResult(
             fund_id=fund_id,
             fund_name=fund.name,
+            adapter_name=adapter_name,
             status=final_status,
-            pages_visited=(crawl_summary.pages_visited),
-            documents_discovered=(crawl_summary.documents_discovered),
-            documents_downloaded=(crawl_summary.documents_downloaded),
-            documents_parsed=(parsing_summary.documents_parsed),
-            scanned_candidates=(parsing_summary.scanned_candidates),
-            fields_found=(extraction_summary.fields_found),
-            fields_missing=(extraction_summary.fields_missing),
+            pages_visited=(crawl_result.pages_visited),
+            documents_discovered=(crawl_result.documents_discovered),
+            documents_downloaded=(crawl_result.documents_downloaded),
+            documents_parsed=(parsing_result.documents_parsed),
+            scanned_candidates=(parsing_result.scanned_candidates),
+            fields_found=(extraction_result.fields_found),
+            fields_missing=(extraction_result.fields_missing),
             field_statuses=tuple(
                 (
                     field_name,
                     status.value,
                 )
-                for field_name, status in extraction_summary.field_statuses
+                for field_name, status in extraction_result.field_statuses
             ),
             failures=tuple(failures),
             duration_seconds=round(
@@ -256,6 +309,7 @@ async def run_fund_pipeline(
                 3,
             ),
         )
+
     except Exception as exc:
         failure_message = f"{type(exc).__name__}: {exc}"
 
@@ -289,6 +343,7 @@ async def run_fund_pipeline(
         return FundPipelineResult(
             fund_id=fund_id,
             fund_name=fund.name,
+            adapter_name=adapter_name,
             status=FundStatus.FAILED,
             pages_visited=(crawl_summary.pages_visited if crawl_summary is not None else 0),
             documents_discovered=(
@@ -337,9 +392,9 @@ async def run_fund_batch(
     max_depth: int = 2,
     max_documents: int = 20,
     force: bool = False,
-    progress_callback: (ProgressCallback | None) = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> BatchPipelineSummary:
-    """Run the pipeline sequentially for a collection of funds."""
+    """Run the complete pipeline sequentially for multiple funds."""
 
     started_at = datetime.now(UTC)
 
@@ -404,6 +459,7 @@ def write_batch_report(
             {
                 "fund_id": result.fund_id,
                 "fund_name": result.fund_name,
+                "adapter_name": (result.adapter_name),
                 "status": result.status.value,
                 "pages_visited": (result.pages_visited),
                 "documents_discovered": (result.documents_discovered),
@@ -424,17 +480,22 @@ def write_batch_report(
 
     temporary_path = report_path.with_suffix(f"{report_path.suffix}.tmp")
 
-    temporary_path.write_text(
-        json.dumps(
-            payload,
-            ensure_ascii=False,
-            indent=2,
+    try:
+        temporary_path.write_text(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
 
-    temporary_path.replace(report_path)
+        temporary_path.replace(report_path)
+    except OSError:
+        temporary_path.unlink(missing_ok=True)
+
+        raise
 
 
 def _mark_output_failed(
@@ -443,6 +504,8 @@ def _mark_output_failed(
     fund_id: str,
     failure_message: str,
 ) -> None:
+    """Mark one output fund as failed without replacing extracted fields."""
+
     outputs = load_output(output_path)
 
     matching_index = next(

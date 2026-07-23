@@ -68,6 +68,8 @@ async def crawl_fund_site(
     max_pages: int = 25,
     max_depth: int = 2,
     max_documents: int = 20,
+    navigation_seed_urls: tuple[str, ...] = (),
+    document_seed_links: tuple[DiscoveredLink, ...] = (),
     force: bool = False,
 ) -> CrawlSummary:
     """Crawl selected HTML pages and download discovered documents."""
@@ -83,14 +85,27 @@ async def crawl_fund_site(
 
     fund_id = stable_fund_id(fund)
 
-    queue: deque[tuple[str, int]] = deque(
-        [
+    queue: deque[tuple[str, int]] = deque()
+
+    queued_urls: set[str] = set()
+
+    for seed_url in (
+        fund.web,
+        *navigation_seed_urls,
+    ):
+        seed_key = canonical_url(seed_url)
+
+        if seed_key in queued_urls:
+            continue
+
+        queued_urls.add(seed_key)
+
+        queue.append(
             (
-                fund.web,
+                seed_url,
                 0,
             )
-        ]
-    )
+        )
 
     visited_pages: set[str] = set()
 
@@ -98,6 +113,23 @@ async def crawl_fund_site(
         str,
         DiscoveredLink,
     ] = {}
+
+    for document in document_seed_links:
+        document_key = canonical_url(document.url)
+
+        existing_document = documents_by_url.get(document_key)
+
+        if existing_document is None or document.score > existing_document.score:
+            documents_by_url[document_key] = document
+
+        upsert_source(
+            database_path,
+            fund_id=fund_id,
+            url=document.url,
+            status=SourceStatus.DISCOVERED,
+            document_type=(document.document_type.value),
+            title=(document.text or None),
+        )
 
     failures: list[CrawlFailure] = []
 
