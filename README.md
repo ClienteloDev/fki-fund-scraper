@@ -27,3 +27,11 @@ Každá nalezená hodnota musí obsahovat dohledatelný zdroj a datum získání
 ## Stav projektu
 
 Počáteční implementace.
+
+## CLI příkazy
+
+Validace vstupního souboru:
+
+```powershell
+uv run fundscraper validate-input data/input/funds.json
+```

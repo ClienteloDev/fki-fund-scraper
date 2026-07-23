@@ -1,0 +1,1266 @@
+{
+  "$defs": {
+    "AssetsUnderManagementValue": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "minimum": 0,
+          "title": "Amount",
+          "type": "number"
+        },
+        "currency": {
+          "maxLength": 3,
+          "minLength": 3,
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "metric_type": {
+          "$ref": "#/$defs/AumMetricType"
+        },
+        "as_of": {
+          "format": "date",
+          "title": "As Of",
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency",
+        "metric_type",
+        "as_of"
+      ],
+      "title": "AssetsUnderManagementValue",
+      "type": "object"
+    },
+    "AumMetricType": {
+      "enum": [
+        "assets_total",
+        "net_assets",
+        "nav",
+        "equity",
+        "fund_aum",
+        "subfund_aum",
+        "manager_aum",
+        "other"
+      ],
+      "title": "AumMetricType",
+      "type": "string"
+    },
+    "Confidence": {
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "DataScope": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/ScopeType"
+        },
+        "fund_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fund Name"
+        },
+        "subfund_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subfund Name"
+        },
+        "share_class_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Share Class Name"
+        },
+        "isin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Isin"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "DataScope",
+      "type": "object"
+    },
+    "DocumentType": {
+      "enum": [
+        "priips_kid",
+        "statute",
+        "subfund_statute",
+        "memorandum",
+        "annual_report",
+        "half_year_report",
+        "financial_statements",
+        "factsheet",
+        "infoletter",
+        "marketing_page",
+        "register",
+        "other"
+      ],
+      "title": "DocumentType",
+      "type": "string"
+    },
+    "EntityMatchStatus": {
+      "enum": [
+        "unverified",
+        "verified",
+        "ambiguous",
+        "not_found"
+      ],
+      "title": "EntityMatchStatus",
+      "type": "string"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/SourceMetadata"
+        },
+        "quote": {
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Section"
+        }
+      },
+      "required": [
+        "source",
+        "quote"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "ExtractionMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "$ref": "#/$defs/ExtractionMethod"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "review_required": {
+          "default": false,
+          "title": "Review Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "method",
+        "confidence"
+      ],
+      "title": "ExtractionMetadata",
+      "type": "object"
+    },
+    "ExtractionMethod": {
+      "enum": [
+        "regex",
+        "table",
+        "html_selector",
+        "llm",
+        "hybrid",
+        "manual"
+      ],
+      "title": "ExtractionMethod",
+      "type": "string"
+    },
+    "FeeCollection": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/FeeItem"
+          },
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "FeeCollection",
+      "type": "object"
+    },
+    "FeeFrequency": {
+      "enum": [
+        "one_off",
+        "annual",
+        "monthly",
+        "per_transaction",
+        "conditional",
+        "other"
+      ],
+      "title": "FeeFrequency",
+      "type": "string"
+    },
+    "FeeItem": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/FeeType"
+        },
+        "rate_percent": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rate Percent"
+        },
+        "fixed_amount": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixed Amount"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currency"
+        },
+        "frequency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FeeFrequency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum"
+        },
+        "basis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Basis"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "FeeItem",
+      "type": "object"
+    },
+    "FeeType": {
+      "enum": [
+        "entry",
+        "management",
+        "performance",
+        "exit",
+        "administration",
+        "depositary",
+        "transaction",
+        "ongoing",
+        "other"
+      ],
+      "title": "FeeType",
+      "type": "string"
+    },
+    "FieldResult_AssetsUnderManagementValue_": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/FieldStatus"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetsUnderManagementValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "raw_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Value"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DataScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Evidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "extraction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractionMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MissingReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "attempted_sources": {
+          "items": {
+            "$ref": "#/$defs/SourceAttempt"
+          },
+          "title": "Attempted Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "FieldResult[AssetsUnderManagementValue]",
+      "type": "object"
+    },
+    "FieldResult_FeeCollection_": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/FieldStatus"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FeeCollection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "raw_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Value"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DataScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Evidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "extraction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractionMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MissingReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "attempted_sources": {
+          "items": {
+            "$ref": "#/$defs/SourceAttempt"
+          },
+          "title": "Attempted Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "FieldResult[FeeCollection]",
+      "type": "object"
+    },
+    "FieldResult_InvestmentHorizonValue_": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/FieldStatus"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvestmentHorizonValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "raw_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Value"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DataScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Evidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "extraction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractionMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MissingReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "attempted_sources": {
+          "items": {
+            "$ref": "#/$defs/SourceAttempt"
+          },
+          "title": "Attempted Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "FieldResult[InvestmentHorizonValue]",
+      "type": "object"
+    },
+    "FieldResult_MinimumInvestmentValue_": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/FieldStatus"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MinimumInvestmentValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "raw_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Value"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DataScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Evidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "extraction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractionMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MissingReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "attempted_sources": {
+          "items": {
+            "$ref": "#/$defs/SourceAttempt"
+          },
+          "title": "Attempted Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "FieldResult[MinimumInvestmentValue]",
+      "type": "object"
+    },
+    "FieldResult_TargetReturnValue_": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/FieldStatus"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetReturnValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "raw_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Value"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DataScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Evidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "extraction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtractionMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MissingReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "attempted_sources": {
+          "items": {
+            "$ref": "#/$defs/SourceAttempt"
+          },
+          "title": "Attempted Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "FieldResult[TargetReturnValue]",
+      "type": "object"
+    },
+    "FieldStatus": {
+      "enum": [
+        "pending",
+        "found",
+        "not_found",
+        "ambiguous",
+        "conflicting",
+        "error"
+      ],
+      "title": "FieldStatus",
+      "type": "string"
+    },
+    "FundIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "ico": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{8}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ico"
+        },
+        "legal_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Legal Name"
+        },
+        "match_status": {
+          "$ref": "#/$defs/EntityMatchStatus",
+          "default": "unverified"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Confidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "FundIdentity",
+      "type": "object"
+    },
+    "FundOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "fund_id": {
+          "pattern": "^fund_[0-9a-f]{16}$",
+          "title": "Fund Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "web": {
+          "minLength": 1,
+          "title": "Web",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/FundIdentity"
+        },
+        "investment_horizon": {
+          "$ref": "#/$defs/FieldResult_InvestmentHorizonValue_"
+        },
+        "minimum_investment": {
+          "$ref": "#/$defs/FieldResult_MinimumInvestmentValue_"
+        },
+        "target_return": {
+          "$ref": "#/$defs/FieldResult_TargetReturnValue_"
+        },
+        "fees": {
+          "$ref": "#/$defs/FieldResult_FeeCollection_"
+        },
+        "assets_under_management": {
+          "$ref": "#/$defs/FieldResult_AssetsUnderManagementValue_"
+        },
+        "processing": {
+          "$ref": "#/$defs/ProcessingMetadata"
+        }
+      },
+      "required": [
+        "fund_id",
+        "name",
+        "web",
+        "identity",
+        "investment_horizon",
+        "minimum_investment",
+        "target_return",
+        "fees",
+        "assets_under_management",
+        "processing"
+      ],
+      "title": "FundOutput",
+      "type": "object"
+    },
+    "InvestmentHorizonValue": {
+      "additionalProperties": false,
+      "properties": {
+        "recommended_years": {
+          "exclusiveMinimum": 0,
+          "title": "Recommended Years",
+          "type": "number"
+        }
+      },
+      "required": [
+        "recommended_years"
+      ],
+      "title": "InvestmentHorizonValue",
+      "type": "object"
+    },
+    "MinimumInvestmentKind": {
+      "enum": [
+        "initial_subscription",
+        "subsequent_subscription",
+        "legal_threshold",
+        "other"
+      ],
+      "title": "MinimumInvestmentKind",
+      "type": "string"
+    },
+    "MinimumInvestmentValue": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "minimum": 0,
+          "title": "Amount",
+          "type": "number"
+        },
+        "currency": {
+          "maxLength": 3,
+          "minLength": 3,
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/MinimumInvestmentKind"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        }
+      },
+      "required": [
+        "amount",
+        "currency",
+        "kind"
+      ],
+      "title": "MinimumInvestmentValue",
+      "type": "object"
+    },
+    "MissingReason": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "detail": {
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail"
+      ],
+      "title": "MissingReason",
+      "type": "object"
+    },
+    "ProcessingMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/ProcessingStatus",
+          "default": "pending"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "updated_at"
+      ],
+      "title": "ProcessingMetadata",
+      "type": "object"
+    },
+    "ProcessingStatus": {
+      "enum": [
+        "pending",
+        "in_progress",
+        "completed",
+        "partial",
+        "failed"
+      ],
+      "title": "ProcessingStatus",
+      "type": "string"
+    },
+    "ReasonCode": {
+      "enum": [
+        "not_publicly_disclosed",
+        "not_quantified",
+        "source_not_found",
+        "website_unreachable",
+        "blocked_by_robots",
+        "captcha_required",
+        "authentication_required",
+        "document_download_failed",
+        "scanned_document_ocr_failed",
+        "unsupported_document_format",
+        "entity_not_matched",
+        "multiple_entity_matches",
+        "multiple_subfunds",
+        "multiple_share_classes",
+        "scope_ambiguous",
+        "conflicting_sources",
+        "source_outdated",
+        "only_manager_level_data",
+        "only_historical_performance",
+        "not_applicable",
+        "manual_review_required",
+        "processing_error"
+      ],
+      "title": "ReasonCode",
+      "type": "string"
+    },
+    "ScopeType": {
+      "enum": [
+        "fund",
+        "subfund",
+        "share_class",
+        "manager",
+        "unknown"
+      ],
+      "title": "ScopeType",
+      "type": "string"
+    },
+    "SourceAttempt": {
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "retrieved_at": {
+          "format": "date-time",
+          "title": "Retrieved At",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "document_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DocumentType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        }
+      },
+      "required": [
+        "url",
+        "retrieved_at",
+        "outcome"
+      ],
+      "title": "SourceAttempt",
+      "type": "object"
+    },
+    "SourceMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "document_type": {
+          "$ref": "#/$defs/DocumentType"
+        },
+        "retrieved_at": {
+          "format": "date-time",
+          "title": "Retrieved At",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "effective_at": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective At"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        }
+      },
+      "required": [
+        "url",
+        "document_type",
+        "retrieved_at"
+      ],
+      "title": "SourceMetadata",
+      "type": "object"
+    },
+    "TargetReturnValue": {
+      "additionalProperties": false,
+      "properties": {
+        "value_percent_pa": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Percent Pa"
+        },
+        "minimum_percent_pa": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum Percent Pa"
+        },
+        "maximum_percent_pa": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum Percent Pa"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        }
+      },
+      "title": "TargetReturnValue",
+      "type": "object"
+    }
+  },
+  "items": {
+    "$ref": "#/$defs/FundOutput"
+  },
+  "type": "array"
+}
