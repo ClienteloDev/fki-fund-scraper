@@ -6,14 +6,19 @@ from pathlib import Path
 import pytest
 
 from fundscraper.database import (
+    AttemptStatus,
     DatabaseError,
+    SourceStatus,
     get_database_status,
     initialize_database,
+    record_attempt,
     register_funds,
     reset_database,
+    upsert_source,
     validate_database,
 )
 from fundscraper.models import FundInput
+from fundscraper.output_service import stable_fund_id
 
 FIXED_TIME = datetime(
     2026,
@@ -135,3 +140,54 @@ def test_reset_database_removes_related_files(
     assert not database_path.exists()
     assert not wal_path.exists()
     assert not shm_path.exists()
+
+
+def test_records_attempt_and_source(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "fundscraper.sqlite3"
+
+    funds = sample_funds()
+
+    initialize_database(
+        database_path,
+        now=FIXED_TIME,
+    )
+
+    register_funds(
+        database_path,
+        funds,
+        now=FIXED_TIME,
+    )
+
+    fund_id = stable_fund_id(funds[0])
+
+    attempt_id = record_attempt(
+        database_path,
+        fund_id=fund_id,
+        stage="fetch_start_page",
+        status=AttemptStatus.SUCCEEDED,
+        url=funds[0].web,
+        now=FIXED_TIME,
+    )
+
+    source_id = upsert_source(
+        database_path,
+        fund_id=fund_id,
+        url=funds[0].web,
+        status=SourceStatus.DOWNLOADED,
+        document_type="marketing_page",
+        content_type="text/html",
+        retrieved_at=FIXED_TIME,
+        http_status=200,
+        sha256="a" * 64,
+        local_path="cache/example.body",
+        now=FIXED_TIME,
+    )
+
+    status = get_database_status(database_path)
+
+    assert attempt_id > 0
+    assert source_id > 0
+    assert status.attempts_total == 1
+    assert status.sources_total == 1

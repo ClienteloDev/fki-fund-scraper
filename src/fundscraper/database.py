@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
@@ -12,6 +13,21 @@ from fundscraper.normalization import canonical_url
 from fundscraper.output_service import stable_fund_id
 
 SCHEMA_VERSION: Final = 1
+
+
+class SourceStatus(StrEnum):
+    DISCOVERED = "discovered"
+    DOWNLOADED = "downloaded"
+    PARSED = "parsed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class AttemptStatus(StrEnum):
+    STARTED = "started"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 SCHEMA_SQL: Final = """
@@ -280,6 +296,179 @@ def register_funds(
         raise DatabaseError(f"Could not register funds in {path}: {exc}") from exc
 
     return len(rows)
+
+
+def record_attempt(
+    path: Path,
+    *,
+    fund_id: str,
+    stage: str,
+    status: AttemptStatus,
+    url: str | None = None,
+    error_code: str | None = None,
+    error_message: str | None = None,
+    now: datetime | None = None,
+) -> int:
+    """Record one processing attempt event."""
+
+    timestamp = utc_now_iso(now)
+
+    try:
+        with closing(connect_database(path)) as connection:
+            _ensure_initialized(
+                connection,
+                path,
+            )
+
+            with connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO attempts (
+                        fund_id,
+                        stage,
+                        url,
+                        status,
+                        error_code,
+                        error_message,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fund_id,
+                        stage,
+                        url,
+                        status.value,
+                        error_code,
+                        error_message,
+                        timestamp,
+                    ),
+                )
+
+                attempt_id = cursor.lastrowid
+
+                if attempt_id is None:
+                    raise DatabaseError("Database did not return an attempt ID")
+
+                return attempt_id
+    except sqlite3.Error as exc:
+        raise DatabaseError(f"Could not record processing attempt in {path}: {exc}") from exc
+
+
+def upsert_source(
+    path: Path,
+    *,
+    fund_id: str,
+    url: str,
+    status: SourceStatus,
+    document_type: str | None = None,
+    content_type: str | None = None,
+    title: str | None = None,
+    published_at: str | None = None,
+    retrieved_at: datetime | None = None,
+    http_status: int | None = None,
+    sha256: str | None = None,
+    local_path: str | None = None,
+    error_code: str | None = None,
+    error_message: str | None = None,
+    now: datetime | None = None,
+) -> int:
+    """Insert or update a discovered source for one fund."""
+
+    timestamp = utc_now_iso(now)
+
+    retrieved_at_value = utc_now_iso(retrieved_at) if retrieved_at is not None else None
+
+    try:
+        with closing(connect_database(path)) as connection:
+            _ensure_initialized(
+                connection,
+                path,
+            )
+
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO sources (
+                        fund_id,
+                        url,
+                        canonical_url,
+                        document_type,
+                        content_type,
+                        title,
+                        published_at,
+                        retrieved_at,
+                        http_status,
+                        sha256,
+                        local_path,
+                        status,
+                        error_code,
+                        error_message,
+                        discovered_at,
+                        updated_at
+                    )
+                    VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?
+                    )
+                    ON CONFLICT (fund_id, canonical_url)
+                    DO UPDATE SET
+                        url = excluded.url,
+                        document_type = excluded.document_type,
+                        content_type = excluded.content_type,
+                        title = excluded.title,
+                        published_at = excluded.published_at,
+                        retrieved_at = excluded.retrieved_at,
+                        http_status = excluded.http_status,
+                        sha256 = excluded.sha256,
+                        local_path = excluded.local_path,
+                        status = excluded.status,
+                        error_code = excluded.error_code,
+                        error_message = excluded.error_message,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        fund_id,
+                        url,
+                        canonical_url(url),
+                        document_type,
+                        content_type,
+                        title,
+                        published_at,
+                        retrieved_at_value,
+                        http_status,
+                        sha256,
+                        local_path,
+                        status.value,
+                        error_code,
+                        error_message,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+
+                row = connection.execute(
+                    """
+                    SELECT source_id
+                    FROM sources
+                    WHERE fund_id = ?
+                      AND canonical_url = ?
+                    """,
+                    (
+                        fund_id,
+                        canonical_url(url),
+                    ),
+                ).fetchone()
+
+                if row is None or not isinstance(
+                    row[0],
+                    int,
+                ):
+                    raise DatabaseError("Database did not return a source ID")
+
+                return row[0]
+    except sqlite3.Error as exc:
+        raise DatabaseError(f"Could not store source in {path}: {exc}") from exc
 
 
 def get_database_status(

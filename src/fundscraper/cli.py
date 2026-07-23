@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from fundscraper.config import (
+    ConfigurationError,
+    HttpSettings,
+)
 from fundscraper.database import (
     DatabaseError,
     get_database_status,
@@ -13,6 +18,14 @@ from fundscraper.database import (
     register_funds,
     reset_database,
     validate_database,
+)
+from fundscraper.fetch_service import (
+    fetch_fund_start_page,
+)
+from fundscraper.http_client import (
+    FetchError,
+    FetchResult,
+    HttpFetcher,
 )
 from fundscraper.input_loader import InputFileError, load_funds
 from fundscraper.normalization import canonical_domain, canonical_url
@@ -290,3 +303,114 @@ def validate_db(
 
     typer.echo(f"Database file: {database_path}")
     typer.echo("Database validation passed.")
+
+
+@app.command("fetch-start-page")
+def fetch_start_page_command(
+    fund_name: Annotated[
+        str,
+        typer.Argument(
+            help="Exact name of the fund from funds.json.",
+        ),
+    ],
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to the source funds.json file.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="Path to the SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="Directory used for downloaded response cache.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore a cached response and download it again.",
+        ),
+    ] = False,
+) -> None:
+    """Download and record the original website of one fund."""
+
+    try:
+        funds = load_funds(input_path)
+
+        matching_funds = [fund for fund in funds if fund.name.casefold() == fund_name.casefold()]
+
+        if not matching_funds:
+            typer.echo(
+                f"Fund was not found: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        if len(matching_funds) > 1:
+            typer.echo(
+                f"Fund name is not unique: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        fund = matching_funds[0]
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        settings = HttpSettings.from_environment()
+
+        async def run_fetch() -> FetchResult:
+            async with HttpFetcher(
+                settings,
+                cache_directory,
+            ) as fetcher:
+                return await fetch_fund_start_page(
+                    database_path=database_path,
+                    fund=fund,
+                    fetcher=fetcher,
+                    force=force,
+                )
+
+        result = asyncio.run(run_fetch())
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        FetchError,
+    ) as exc:
+        typer.echo(
+            f"Start page fetch failed: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Fund: {fund.name}")
+    typer.echo(f"Requested URL: {result.requested_url}")
+    typer.echo(f"Final URL: {result.final_url}")
+    typer.echo(f"HTTP status: {result.status_code}")
+    typer.echo(f"Content type: {result.content_type}")
+    typer.echo(f"Downloaded bytes: {len(result.body)}")
+    typer.echo(f"SHA-256: {result.sha256}")
+    typer.echo(f"Cache hit: {result.from_cache}")
+    typer.echo(f"Local file: {result.local_path}")

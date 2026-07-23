@@ -19,3 +19,7 @@ Interní `fund_id` vzniká deterministicky z názvu a normalizované URL. Opakov
 ## SQLite pracovní databáze
 
 SQLite uchovává průběh, zdroje a chyby. Umožňuje přerušení a obnovení zpracování bez opakovaného stahování. Databáze je runtime soubor v `cache/` a není commitována.
+
+## HTTP vrstva
+
+HTTP požadavky používají asynchronní connection pooling, omezení souběhu, rate limiting a retry pouze pro síťové chyby a dočasné HTTP statusy. Odpovědi se ukládají do lokální cache s SHA-256 kontrolou. Trvalé chyby 4xx se automaticky neopakují.

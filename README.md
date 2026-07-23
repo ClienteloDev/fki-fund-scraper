@@ -43,3 +43,22 @@ Průběh zpracování se ukládá do lokální SQLite databáze:
 ```text
 cache/fundscraper.sqlite3
 ```
+
+## HTTP stahování
+
+HTTP vrstva používá:
+
+- asynchronní klient,
+- explicitní timeout,
+- omezení počtu souběžných spojení,
+- omezení rychlosti požadavků,
+- retry pro dočasné síťové chyby a vybrané HTTP statusy,
+- maximální povolenou velikost odpovědi,
+- lokální cache podle URL,
+- SHA-256 kontrolu uloženého obsahu.
+
+Stažení startovní stránky jednoho fondu:
+
+```powershell
+uv run fundscraper fetch-start-page "3M FUND MSI SICAV a.s."
+```
