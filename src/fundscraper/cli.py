@@ -18,6 +18,7 @@ from fundscraper.crawl_service import (
 )
 from fundscraper.database import (
     DatabaseError,
+    FundStatus,
     get_database_status,
     initialize_database,
     register_funds,
@@ -59,6 +60,14 @@ from fundscraper.output_service import (
     load_output,
     write_output,
     write_output_schema,
+)
+from fundscraper.pipeline_service import (
+    BatchPipelineSummary,
+    FundPipelineResult,
+    run_fund_batch,
+    run_fund_pipeline,
+    synchronize_output_file,
+    write_batch_report,
 )
 
 app = typer.Typer(
@@ -934,3 +943,389 @@ def extract_fund_command(
 
     typer.echo(f"Warnings: {len(summary.warnings)}")
     typer.echo(f"Output file: {summary.output_path}")
+
+
+@app.command("run-fund")
+def run_fund_command(
+    fund_name: Annotated[
+        str,
+        typer.Argument(
+            help="Exact fund name from funds.json.",
+        ),
+    ],
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Enriched output JSON file.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.enriched.json"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="HTTP cache directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    parsed_directory: Annotated[
+        Path,
+        typer.Option(
+            "--parsed-directory",
+            help="Parsed document directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/parsed"),
+    max_pages: Annotated[
+        int,
+        typer.Option(
+            "--max-pages",
+            min=1,
+            max=100,
+        ),
+    ] = 25,
+    max_depth: Annotated[
+        int,
+        typer.Option(
+            "--max-depth",
+            min=0,
+            max=5,
+        ),
+    ] = 2,
+    max_documents: Annotated[
+        int,
+        typer.Option(
+            "--max-documents",
+            min=0,
+            max=100,
+        ),
+    ] = 20,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore cached and previously parsed data.",
+        ),
+    ] = False,
+) -> None:
+    """Run the complete pipeline for one fund."""
+
+    result: FundPipelineResult
+
+    try:
+        funds = load_funds(input_path)
+
+        matching_funds = [fund for fund in funds if (fund.name.casefold() == fund_name.casefold())]
+
+        if not matching_funds:
+            typer.echo(
+                f"Fund was not found: {fund_name}",
+                err=True,
+            )
+
+            raise typer.Exit(code=1)
+
+        if len(matching_funds) > 1:
+            typer.echo(
+                f"Fund name is not unique: {fund_name}",
+                err=True,
+            )
+
+            raise typer.Exit(code=1)
+
+        fund = matching_funds[0]
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        synchronize_output_file(
+            funds=funds,
+            output_path=output_path,
+        )
+
+        settings = HttpSettings.from_environment()
+
+        async def run_pipeline() -> FundPipelineResult:
+            async with HttpFetcher(
+                settings,
+                cache_directory,
+            ) as fetcher:
+                return await run_fund_pipeline(
+                    database_path=database_path,
+                    output_path=output_path,
+                    parsed_directory=parsed_directory,
+                    fund=fund,
+                    fetcher=fetcher,
+                    max_pages=max_pages,
+                    max_depth=max_depth,
+                    max_documents=max_documents,
+                    force=force,
+                )
+
+        result = asyncio.run(run_pipeline())
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        OutputFileError,
+    ) as exc:
+        typer.echo(
+            f"Fund pipeline failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Fund: {result.fund_name}")
+
+    typer.echo(f"Status: {result.status.value}")
+
+    typer.echo(f"Pages visited: {result.pages_visited}")
+
+    typer.echo(f"Documents discovered: {result.documents_discovered}")
+
+    typer.echo(f"Documents downloaded: {result.documents_downloaded}")
+
+    typer.echo(f"Documents parsed: {result.documents_parsed}")
+
+    typer.echo(f"Fields found: {result.fields_found}/5")
+
+    for field_name, status in result.field_statuses:
+        typer.echo(f"- {field_name}: {status}")
+
+    typer.echo(f"Failures: {len(result.failures)}")
+
+    typer.echo(f"Duration seconds: {result.duration_seconds}")
+
+    if result.status is FundStatus.FAILED:
+        raise typer.Exit(code=1)
+
+
+@app.command("run-sample")
+def run_sample_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Enriched output JSON file.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.enriched.json"),
+    report_path: Annotated[
+        Path,
+        typer.Option(
+            "--report",
+            help="JSON report for the sample run.",
+            dir_okay=False,
+        ),
+    ] = Path("reports/sample-run.json"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="HTTP cache directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    parsed_directory: Annotated[
+        Path,
+        typer.Option(
+            "--parsed-directory",
+            help="Parsed document directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/parsed"),
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            min=1,
+            max=230,
+            help="Number of funds to process.",
+        ),
+    ] = 10,
+    offset: Annotated[
+        int,
+        typer.Option(
+            "--offset",
+            min=0,
+            help="Number of input funds to skip.",
+        ),
+    ] = 0,
+    max_pages: Annotated[
+        int,
+        typer.Option(
+            "--max-pages",
+            min=1,
+            max=100,
+        ),
+    ] = 25,
+    max_depth: Annotated[
+        int,
+        typer.Option(
+            "--max-depth",
+            min=0,
+            max=5,
+        ),
+    ] = 2,
+    max_documents: Annotated[
+        int,
+        typer.Option(
+            "--max-documents",
+            min=0,
+            max=100,
+        ),
+    ] = 20,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore cached and parsed data.",
+        ),
+    ] = False,
+    fresh_output: Annotated[
+        bool,
+        typer.Option(
+            "--fresh-output",
+            help="Reset all enriched output records to pending.",
+        ),
+    ] = False,
+) -> None:
+    """Run the complete pipeline for a sample of input funds."""
+
+    summary: BatchPipelineSummary
+
+    try:
+        funds = load_funds(input_path)
+
+        if offset >= len(funds):
+            typer.echo(
+                f"Sample offset is outside the input fund list: {offset} >= {len(funds)}",
+                err=True,
+            )
+
+            raise typer.Exit(code=1)
+
+        selected_funds = funds[offset : offset + limit]
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        synchronize_output_file(
+            funds=funds,
+            output_path=output_path,
+            reset=fresh_output,
+        )
+
+        settings = HttpSettings.from_environment()
+
+        def show_progress(
+            index: int,
+            total: int,
+            result: FundPipelineResult,
+        ) -> None:
+            typer.echo(
+                f"[{index}/{total}] "
+                f"{result.fund_name}: "
+                f"{result.status.value}, "
+                f"{result.fields_found}/5 fields"
+            )
+
+        async def run_batch() -> BatchPipelineSummary:
+            async with HttpFetcher(
+                settings,
+                cache_directory,
+            ) as fetcher:
+                return await run_fund_batch(
+                    database_path=database_path,
+                    output_path=output_path,
+                    parsed_directory=parsed_directory,
+                    funds=selected_funds,
+                    fetcher=fetcher,
+                    max_pages=max_pages,
+                    max_depth=max_depth,
+                    max_documents=max_documents,
+                    force=force,
+                    progress_callback=show_progress,
+                )
+
+        summary = asyncio.run(run_batch())
+
+        write_batch_report(
+            summary=summary,
+            report_path=report_path,
+        )
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        OutputFileError,
+    ) as exc:
+        typer.echo(
+            f"Sample pipeline failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    typer.echo("")
+    typer.echo(f"Funds requested: {summary.requested}")
+
+    typer.echo(f"Completed 5/5: {summary.completed}")
+
+    typer.echo(f"Partial: {summary.partial}")
+
+    typer.echo(f"Failed: {summary.failed}")
+
+    typer.echo(f"Output file: {summary.output_path}")
+
+    typer.echo(f"Report file: {report_path}")

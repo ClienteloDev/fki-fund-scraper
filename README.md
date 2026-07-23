@@ -145,3 +145,20 @@ Historická výkonnost se nepoužívá jako náhrada cílového výnosu. Hodnota
 uv run fundscraper extract-fund `
     "3M FUND MSI SICAV a.s."
 ```
+
+## End-to-end pipeline
+
+Kompletní pipeline jednoho fondu:
+
+```powershell
+uv run fundscraper run-fund `
+    "3M FUND MSI SICAV a.s."
+```
+
+Vzorek deseti fondů:
+
+```powershell
+uv run fundscraper run-sample `
+    --limit 10 `
+    --fresh-output
+```

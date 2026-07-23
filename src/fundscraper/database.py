@@ -15,6 +15,14 @@ from fundscraper.output_service import stable_fund_id
 SCHEMA_VERSION: Final = 2
 
 
+class FundStatus(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
 class SourceStatus(StrEnum):
     DISCOVERED = "discovered"
     DOWNLOADED = "downloaded"
@@ -788,6 +796,48 @@ def list_parsed_documents(
         )
         for row in rows
     ]
+
+
+def update_fund_status(
+    path: Path,
+    *,
+    fund_id: str,
+    status: FundStatus,
+    now: datetime | None = None,
+) -> None:
+    """Update the processing status of one registered fund."""
+
+    timestamp = utc_now_iso(now)
+
+    try:
+        with closing(connect_database(path)) as connection:
+            _ensure_initialized(
+                connection,
+                path,
+            )
+
+            with connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE funds
+                    SET
+                        status = ?,
+                        updated_at = ?
+                    WHERE fund_id = ?
+                    """,
+                    (
+                        status.value,
+                        timestamp,
+                        fund_id,
+                    ),
+                )
+
+                if cursor.rowcount != 1:
+                    raise DatabaseError(
+                        f"Fund does not exist in the processing database: {fund_id}"
+                    )
+    except sqlite3.Error as exc:
+        raise DatabaseError(f"Could not update fund status in {path}: {exc}") from exc
 
 
 def get_database_status(

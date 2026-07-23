@@ -39,3 +39,7 @@ PDF se extrahuje po stránkách pomocí PyMuPDF, aby bylo možné uvádět čís
 ## Extrakce polí
 
 První extrakční vrstva používá deterministické regulární výrazy a dokumentové priority. Historická výkonnost se nezaměňuje za cílový výnos. AUM vyžaduje explicitní datum, částku a měnu. Nenalezené hodnoty jsou ukládány se strukturovaným důvodem a seznamem prohledaných zdrojů.
+
+## Pipeline
+
+Crawler, parser a extraktory jsou spojeny do jedné sekvenční pipeline. Sekvenční běh chrání SQLite a výstupní JSON před souběžnými zápisy. Chyba jednoho fondu se zaznamená jako `failed`, ale nezastaví zbytek dávky. Výstup se synchronizuje podle stabilních `fund_id`.
