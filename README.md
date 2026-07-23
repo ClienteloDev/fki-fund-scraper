@@ -222,3 +222,13 @@ uv run fundscraper build-grounding-packets `
     --limit 10 `
     --max-snippets 8
 ```
+
+## Grounded rozhodnutí
+
+Grounding packet může zpracovat ruční kontrola nebo libovolný externí provider. Provider vrací pouze validovaný JSON soubor.
+
+```powershell
+uv run fundscraper apply-grounded-decisions `
+    --packets reports/grounding-packets.json `
+    --decisions reports/grounded-decisions.json
+```

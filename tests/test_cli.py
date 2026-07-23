@@ -336,3 +336,22 @@ def test_build_grounding_packets_rejects_invalid_offset(
     assert result.exit_code == 1
 
     assert "Grounding offset is outside" in result.output
+
+
+def test_apply_grounded_decisions_reports_missing_file(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "apply-grounded-decisions",
+            "--packets",
+            str(tmp_path / "missing-packets.json"),
+            "--decisions",
+            str(tmp_path / "missing-decisions.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert "Grounded decision application failed:" in result.output

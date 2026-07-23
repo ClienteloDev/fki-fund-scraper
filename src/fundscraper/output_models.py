@@ -35,6 +35,7 @@ class Confidence(StrEnum):
 
 class ExtractionMethod(StrEnum):
     REGEX = "regex"
+    GROUNDED = "grounded"
     TABLE = "table"
     HTML_SELECTOR = "html_selector"
     LLM = "llm"

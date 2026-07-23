@@ -74,6 +74,8 @@ class FieldGroundingPacket(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    packet_id: str = Field(min_length=1)
+
     fund_id: str
     fund_name: str
     web: HttpUrl
@@ -374,6 +376,7 @@ def build_grounding_packets(
 
             packets.append(
                 FieldGroundingPacket(
+                    packet_id=(f"{fund_id}:{field.value}"),
                     fund_id=fund_id,
                     fund_name=fund.name,
                     web=HttpUrl(str(fund.web)),
@@ -438,6 +441,29 @@ def write_grounding_packets(
         raise GroundingPacketError(
             f"Grounding packets could not be written: {path}: {exc}"
         ) from exc
+
+
+def load_grounding_packets(
+    path: Path,
+) -> GroundingBatchReport:
+    """Load and validate a grounding packet report."""
+
+    try:
+        payload: object = json.loads(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError as exc:
+        raise GroundingPacketError(f"Grounding packet report does not exist: {path}") from exc
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise GroundingPacketError(
+            f"Grounding packet report could not be loaded: {path}: {exc}"
+        ) from exc
+
+    try:
+        return GroundingBatchReport.model_validate(payload)
+    except ValueError as exc:
+        raise GroundingPacketError(f"Grounding packet report is invalid: {path}: {exc}") from exc
 
 
 def _load_grounding_documents(

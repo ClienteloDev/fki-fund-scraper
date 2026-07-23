@@ -59,10 +59,19 @@ from fundscraper.fallback_sources import (
 from fundscraper.fetch_service import (
     fetch_fund_start_page,
 )
+from fundscraper.grounded_application import (
+    GroundedApplicationSummary,
+    apply_grounded_decisions,
+)
+from fundscraper.grounded_decisions import (
+    GroundedDecisionError,
+    load_grounded_decisions,
+)
 from fundscraper.grounding_packets import (
     GroundingBatchReport,
     GroundingPacketError,
     build_grounding_packets,
+    load_grounding_packets,
     write_grounding_packets,
 )
 from fundscraper.html_discovery import (
@@ -1717,3 +1726,83 @@ def build_grounding_packets_command(
     typer.echo(f"Packets without context: {report.packets_without_context}")
 
     typer.echo(f"Report file: {report_path}")
+
+
+@app.command("apply-grounded-decisions")
+def apply_grounded_decisions_command(
+    packet_path: Annotated[
+        Path,
+        typer.Option(
+            "--packets",
+            help="Grounding packet report JSON.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("reports/grounding-packets.json"),
+    decision_path: Annotated[
+        Path,
+        typer.Option(
+            "--decisions",
+            help="Grounded provider decision JSON.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("reports/grounded-decisions.json"),
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Enriched output JSON.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.enriched.json"),
+    allow_overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--allow-overwrite",
+            help="Allow replacing fields already marked as found.",
+        ),
+    ] = False,
+) -> None:
+    """Validate and apply grounded provider decisions."""
+
+    summary: GroundedApplicationSummary
+
+    try:
+        packets = load_grounding_packets(packet_path)
+
+        decisions = load_grounded_decisions(decision_path)
+
+        summary = apply_grounded_decisions(
+            packet_report=packets,
+            decision_file=decisions,
+            output_path=output_path,
+            allow_overwrite=allow_overwrite,
+        )
+
+    except (
+        GroundingPacketError,
+        GroundedDecisionError,
+        OutputFileError,
+    ) as exc:
+        typer.echo(
+            f"Grounded decision application failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Provider: {summary.provider}")
+
+    typer.echo(f"Decisions received: {summary.decisions_received}")
+
+    typer.echo(f"Decisions applied: {summary.decisions_applied}")
+
+    typer.echo(f"Found applied: {summary.found_applied}")
+
+    typer.echo(f"Unresolved applied: {summary.unresolved_applied}")
+
+    typer.echo(f"Funds updated: {summary.funds_updated}")
+
+    typer.echo(f"Output file: {summary.output_path}")

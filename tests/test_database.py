@@ -8,12 +8,14 @@ import pytest
 from fundscraper.database import (
     AttemptStatus,
     DatabaseError,
+    FundStatus,
     SourceStatus,
     get_database_status,
     initialize_database,
     record_attempt,
     register_funds,
     reset_database,
+    update_fund_status,
     upsert_source,
     validate_database,
 )
@@ -226,3 +228,37 @@ def test_register_funds_removes_stale_records(
 
     assert synchronized_status.funds_total == 1
     assert synchronized_status.funds_pending == 1
+
+
+def test_updates_fund_processing_status(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "fundscraper.sqlite3"
+
+    funds = sample_funds()
+
+    initialize_database(
+        database_path,
+        now=FIXED_TIME,
+    )
+
+    register_funds(
+        database_path,
+        funds,
+        now=FIXED_TIME,
+    )
+
+    fund_id = stable_fund_id(funds[0])
+
+    update_fund_status(
+        database_path,
+        fund_id=fund_id,
+        status=FundStatus.COMPLETED,
+        now=FIXED_TIME,
+    )
+
+    status = get_database_status(database_path)
+
+    assert status.funds_total == 2
+    assert status.funds_completed == 1
+    assert status.funds_pending == 1

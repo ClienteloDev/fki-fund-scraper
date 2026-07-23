@@ -59,3 +59,7 @@ Kandidátní hodnoty jsou kontrolovány proti identitě fondu. Text popisující
 ## Grounded fallback
 
 LLM fallback nesmí prohledávat vlastní znalosti ani volný internet. Nejprve vznikne omezený grounding packet z již získaných dokumentů. Obsahuje citace, URL, typ dokumentu a číslo stránky. Pokud packet nemá použitelný text, pole zůstává nenalezené a pokračuje na source fallback.
+
+## Grounded rozhodnutí
+
+Grounded provider komunikuje pouze přes JSON kontrakt. Každé nalezené pole musí odkazovat na existující packet a snippet. Provider nemůže přímo změnit výsledný soubor. Aplikační vrstva validuje hodnotu, citaci a zákaz přepsání již nalezených údajů.
