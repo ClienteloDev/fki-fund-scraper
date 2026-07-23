@@ -11,6 +11,7 @@ dependencies = [
     "aiolimiter>=1.2.1",
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
+    "pymupdf>=1.28.0",
     "python-dotenv>=1.2.2",
     "selectolax>=0.4.11",
     "tenacity>=9.1.4",
@@ -66,3 +67,10 @@ warn_unreachable = true
 show_error_codes = true
 pretty = true
 files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = [
+    "pymupdf",
+    "pymupdf.*",
+]
+ignore_missing_imports = true

@@ -12,7 +12,7 @@ from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_url
 from fundscraper.output_service import stable_fund_id
 
-SCHEMA_VERSION: Final = 1
+SCHEMA_VERSION: Final = 2
 
 
 class SourceStatus(StrEnum):
@@ -137,11 +137,75 @@ ON attempts(stage);
 
 CREATE INDEX IF NOT EXISTS idx_attempts_status
 ON attempts(status);
+CREATE TABLE IF NOT EXISTS parsed_documents (
+    source_id INTEGER PRIMARY KEY,
+    fund_id TEXT NOT NULL,
+    document_format TEXT NOT NULL
+        CHECK (
+            document_format IN (
+                'pdf',
+                'html',
+                'xhtml',
+                'xml',
+                'text'
+            )
+        ),
+    parser_name TEXT NOT NULL,
+    page_count INTEGER NOT NULL
+        CHECK (page_count >= 0),
+    character_count INTEGER NOT NULL
+        CHECK (character_count >= 0),
+    scanned_candidate INTEGER NOT NULL
+        CHECK (
+            scanned_candidate IN (0, 1)
+        ),
+    text_path TEXT NOT NULL,
+    parsed_at TEXT NOT NULL,
+    FOREIGN KEY (source_id)
+        REFERENCES sources(source_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (fund_id)
+        REFERENCES funds(fund_id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_parsed_documents_fund_id
+ON parsed_documents(fund_id);
+
+CREATE INDEX IF NOT EXISTS idx_parsed_documents_scanned
+ON parsed_documents(scanned_candidate);
 """
 
 
 class DatabaseError(RuntimeError):
     """Raised when the processing database operation fails."""
+
+
+@dataclass(frozen=True, slots=True)
+class SourceRecord:
+    source_id: int
+    fund_id: str
+    url: str
+    document_type: str | None
+    content_type: str | None
+    local_path: str | None
+    status: SourceStatus
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedDocumentRecord:
+    source_id: int
+    fund_id: str
+    url: str
+    document_type: str | None
+    content_type: str | None
+    document_format: str
+    parser_name: str
+    page_count: int
+    character_count: int
+    scanned_candidate: bool
+    text_path: str
+    parsed_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +219,7 @@ class DatabaseStatus:
     funds_failed: int
     sources_total: int
     attempts_total: int
+    parsed_documents_total: int
 
 
 def utc_now_iso(
@@ -513,6 +578,212 @@ def upsert_source(
         raise DatabaseError(f"Could not store source in {path}: {exc}") from exc
 
 
+def list_parseable_sources(
+    path: Path,
+    *,
+    fund_id: str,
+    include_parsed: bool = False,
+) -> list[SourceRecord]:
+    """Return downloaded sources that can be converted to text."""
+
+    statuses = (
+        (
+            SourceStatus.DOWNLOADED.value,
+            SourceStatus.PARSED.value,
+        )
+        if include_parsed
+        else (SourceStatus.DOWNLOADED.value,)
+    )
+
+    placeholders = ", ".join("?" for _ in statuses)
+
+    query = f"""
+        SELECT
+            source_id,
+            fund_id,
+            url,
+            document_type,
+            content_type,
+            local_path,
+            status
+        FROM sources
+        WHERE fund_id = ?
+          AND status IN ({placeholders})
+        ORDER BY source_id
+    """
+
+    parameters: tuple[object, ...] = (
+        fund_id,
+        *statuses,
+    )
+
+    try:
+        with closing(connect_database(path)) as connection:
+            _ensure_initialized(
+                connection,
+                path,
+            )
+
+            rows = connection.execute(
+                query,
+                parameters,
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise DatabaseError(f"Could not list parseable sources from {path}: {exc}") from exc
+
+    return [
+        SourceRecord(
+            source_id=int(row[0]),
+            fund_id=str(row[1]),
+            url=str(row[2]),
+            document_type=(str(row[3]) if row[3] is not None else None),
+            content_type=(str(row[4]) if row[4] is not None else None),
+            local_path=(str(row[5]) if row[5] is not None else None),
+            status=SourceStatus(str(row[6])),
+        )
+        for row in rows
+    ]
+
+
+def record_parsed_document(
+    path: Path,
+    *,
+    source_id: int,
+    fund_id: str,
+    document_format: str,
+    parser_name: str,
+    page_count: int,
+    character_count: int,
+    scanned_candidate: bool,
+    text_path: str,
+    now: datetime | None = None,
+) -> None:
+    """Store parsed document metadata and mark its source as parsed."""
+
+    timestamp = utc_now_iso(now)
+
+    try:
+        with closing(connect_database(path)) as connection:
+            _ensure_initialized(
+                connection,
+                path,
+            )
+
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO parsed_documents (
+                        source_id,
+                        fund_id,
+                        document_format,
+                        parser_name,
+                        page_count,
+                        character_count,
+                        scanned_candidate,
+                        text_path,
+                        parsed_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (source_id)
+                    DO UPDATE SET
+                        fund_id = excluded.fund_id,
+                        document_format = excluded.document_format,
+                        parser_name = excluded.parser_name,
+                        page_count = excluded.page_count,
+                        character_count = excluded.character_count,
+                        scanned_candidate = excluded.scanned_candidate,
+                        text_path = excluded.text_path,
+                        parsed_at = excluded.parsed_at
+                    """,
+                    (
+                        source_id,
+                        fund_id,
+                        document_format,
+                        parser_name,
+                        page_count,
+                        character_count,
+                        int(scanned_candidate),
+                        text_path,
+                        timestamp,
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    UPDATE sources
+                    SET
+                        status = 'parsed',
+                        updated_at = ?
+                    WHERE source_id = ?
+                    """,
+                    (
+                        timestamp,
+                        source_id,
+                    ),
+                )
+    except sqlite3.Error as exc:
+        raise DatabaseError(f"Could not record parsed document in {path}: {exc}") from exc
+
+
+def list_parsed_documents(
+    path: Path,
+    *,
+    fund_id: str,
+) -> list[ParsedDocumentRecord]:
+    """Return parsed documents available for extraction."""
+
+    try:
+        with closing(connect_database(path)) as connection:
+            _ensure_initialized(
+                connection,
+                path,
+            )
+
+            rows = connection.execute(
+                """
+                SELECT
+                    parsed.source_id,
+                    parsed.fund_id,
+                    sources.url,
+                    sources.document_type,
+                    sources.content_type,
+                    parsed.document_format,
+                    parsed.parser_name,
+                    parsed.page_count,
+                    parsed.character_count,
+                    parsed.scanned_candidate,
+                    parsed.text_path,
+                    parsed.parsed_at
+                FROM parsed_documents AS parsed
+                INNER JOIN sources
+                    ON sources.source_id = parsed.source_id
+                WHERE parsed.fund_id = ?
+                ORDER BY parsed.source_id
+                """,
+                (fund_id,),
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise DatabaseError(f"Could not list parsed documents from {path}: {exc}") from exc
+
+    return [
+        ParsedDocumentRecord(
+            source_id=int(row[0]),
+            fund_id=str(row[1]),
+            url=str(row[2]),
+            document_type=(str(row[3]) if row[3] is not None else None),
+            content_type=(str(row[4]) if row[4] is not None else None),
+            document_format=str(row[5]),
+            parser_name=str(row[6]),
+            page_count=int(row[7]),
+            character_count=int(row[8]),
+            scanned_candidate=bool(row[9]),
+            text_path=str(row[10]),
+            parsed_at=str(row[11]),
+        )
+        for row in rows
+    ]
+
+
 def get_database_status(
     path: Path,
 ) -> DatabaseStatus:
@@ -581,6 +852,10 @@ def get_database_status(
                 attempts_total=_count_rows(
                     connection,
                     "SELECT COUNT(*) FROM attempts",
+                ),
+                parsed_documents_total=_count_rows(
+                    connection,
+                    "SELECT COUNT(*) FROM parsed_documents",
                 ),
             )
     except sqlite3.Error as exc:

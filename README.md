@@ -107,3 +107,24 @@ uv run fundscraper crawl-fund `
     --max-depth 2 `
     --max-documents 20
 ```
+
+## Parsování dokumentů
+
+Stažené zdroje jsou převáděny do jednotného textového formátu.
+
+Podporované formáty:
+
+- PDF,
+- HTML,
+- XHTML,
+- XML,
+- prostý text.
+
+PDF zachovává čísla stran. To umožňuje později uložit přesnou stránku zdroje ke každému extrahovanému údaji.
+
+Dokumenty s velmi malým množstvím extrahovaného textu jsou označeny jako možné skeny. OCR je samostatná záložní fáze.
+
+```powershell
+uv run fundscraper parse-fund-documents `
+    "3M FUND MSI SICAV a.s."
+```

@@ -28,6 +28,13 @@ from fundscraper.discovery_service import (
     DiscoverySummary,
     discover_fund_start_page,
 )
+from fundscraper.document_parser import (
+    DocumentParseError,
+)
+from fundscraper.document_service import (
+    DocumentParsingSummary,
+    parse_fund_documents,
+)
 from fundscraper.fetch_service import (
     fetch_fund_start_page,
 )
@@ -290,6 +297,7 @@ def db_status(
     typer.echo(f"Funds failed: {status.funds_failed}")
     typer.echo(f"Sources total: {status.sources_total}")
     typer.echo(f"Attempts total: {status.attempts_total}")
+    typer.echo(f"Parsed documents total: {status.parsed_documents_total}")
 
 
 @app.command("validate-db")
@@ -710,3 +718,117 @@ def crawl_fund_command(
 
         for failure in summary.failures:
             typer.echo(f"- {failure.stage}: {failure.url}: {failure.error_code}")
+
+
+@app.command("parse-fund-documents")
+def parse_fund_documents_command(
+    fund_name: Annotated[
+        str,
+        typer.Argument(
+            help="Exact fund name from funds.json.",
+        ),
+    ],
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    parsed_directory: Annotated[
+        Path,
+        typer.Option(
+            "--parsed-directory",
+            help="Directory for parsed document JSON files.",
+            file_okay=False,
+        ),
+    ] = Path("cache/parsed"),
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Parse sources already marked as parsed again.",
+        ),
+    ] = False,
+) -> None:
+    """Convert downloaded fund documents into normalized text."""
+
+    summary: DocumentParsingSummary
+
+    try:
+        funds = load_funds(input_path)
+
+        matching_funds = [fund for fund in funds if (fund.name.casefold() == fund_name.casefold())]
+
+        if not matching_funds:
+            typer.echo(
+                f"Fund was not found: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        if len(matching_funds) > 1:
+            typer.echo(
+                f"Fund name is not unique: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        fund = matching_funds[0]
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        summary = asyncio.run(
+            parse_fund_documents(
+                database_path=database_path,
+                fund=fund,
+                parsed_directory=parsed_directory,
+                force=force,
+            )
+        )
+    except (
+        InputFileError,
+        DatabaseError,
+        DocumentParseError,
+    ) as exc:
+        typer.echo(
+            f"Document parsing failed: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Fund: {summary.fund_name}")
+    typer.echo(f"Sources considered: {summary.sources_considered}")
+    typer.echo(f"Documents parsed: {summary.documents_parsed}")
+    typer.echo(f"Scanned PDF candidates: {summary.scanned_candidates}")
+    typer.echo(f"Extracted characters: {summary.total_characters}")
+    typer.echo(f"Failures: {len(summary.failures)}")
+
+    if summary.failures:
+        typer.echo("")
+        typer.echo("Parsing failures:")
+
+        for failure in summary.failures:
+            typer.echo(
+                f"- Source {failure.source_id}: "
+                f"{failure.url}: "
+                f"{failure.error_code}: "
+                f"{failure.message}"
+            )

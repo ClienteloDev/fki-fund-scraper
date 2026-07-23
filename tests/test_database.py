@@ -64,11 +64,12 @@ def test_initialize_register_and_validate_database(
     validate_database(database_path)
 
     assert registered_count == 2
-    assert status.schema_version == 1
+    assert status.schema_version == 2
     assert status.funds_total == 2
     assert status.funds_pending == 2
     assert status.sources_total == 0
     assert status.attempts_total == 0
+    assert status.parsed_documents_total == 0
 
 
 def test_register_funds_is_idempotent(
