@@ -43,3 +43,7 @@ První extrakční vrstva používá deterministické regulární výrazy a doku
 ## Pipeline
 
 Crawler, parser a extraktory jsou spojeny do jedné sekvenční pipeline. Sekvenční běh chrání SQLite a výstupní JSON před souběžnými zápisy. Chyba jednoho fondu se zaznamená jako `failed`, ale nezastaví zbytek dávky. Výstup se synchronizuje podle stabilních `fund_id`.
+
+## Fallbacky
+
+Nenalezená hodnota nevede k neřízenému internetovému hledání. Planner vytváří prioritní posloupnost: rozšířený oficiální crawl, doménový adaptér, OCR, schválený externí zdroj, grounded LLM a manuální kontrola. Externí databáze musí být explicitně uvedena v registru zdrojů.

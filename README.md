@@ -162,3 +162,12 @@ uv run fundscraper run-sample `
     --limit 10 `
     --fresh-output
 ```
+
+## Fallback plán
+
+Po dokončení sample pipeline lze vytvořit plán dalšího dohledávání:
+
+```powershell
+uv run fundscraper plan-fallbacks `
+    --limit 10
+```

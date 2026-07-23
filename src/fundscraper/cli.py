@@ -41,6 +41,15 @@ from fundscraper.extraction_service import (
     ExtractionSummary,
     extract_fund_data,
 )
+from fundscraper.fallback_planner import (
+    FallbackPlanError,
+    build_fallback_plan,
+    write_fallback_plan,
+)
+from fundscraper.fallback_sources import (
+    FallbackSourceConfigError,
+    load_approved_fallback_sources,
+)
 from fundscraper.fetch_service import (
     fetch_fund_start_page,
 )
@@ -1327,5 +1336,132 @@ def run_sample_command(
     typer.echo(f"Failed: {summary.failed}")
 
     typer.echo(f"Output file: {summary.output_path}")
+
+    typer.echo(f"Report file: {report_path}")
+
+
+@app.command("plan-fallbacks")
+def plan_fallbacks_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    enriched_output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output-data",
+            help="Enriched fund output JSON.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.enriched.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    source_config_path: Annotated[
+        Path,
+        typer.Option(
+            "--sources",
+            help="Approved fallback source registry.",
+            dir_okay=False,
+        ),
+    ] = Path("config/fallback_sources.json"),
+    report_path: Annotated[
+        Path,
+        typer.Option(
+            "--report",
+            help="Fallback plan output JSON.",
+            dir_okay=False,
+        ),
+    ] = Path("reports/fallback-plan.json"),
+    limit: Annotated[
+        int | None,
+        typer.Option(
+            "--limit",
+            min=1,
+            max=230,
+            help="Maximum number of input funds to inspect.",
+        ),
+    ] = None,
+    offset: Annotated[
+        int,
+        typer.Option(
+            "--offset",
+            min=0,
+        ),
+    ] = 0,
+) -> None:
+    """Create ordered fallback actions for incomplete funds."""
+
+    try:
+        funds = load_funds(input_path)
+
+        if offset >= len(funds):
+            typer.echo(
+                f"Fallback offset is outside the input fund list: {offset} >= {len(funds)}",
+                err=True,
+            )
+
+            raise typer.Exit(code=1)
+
+        selected_funds = funds[offset:] if limit is None else funds[offset : offset + limit]
+
+        outputs = load_output(enriched_output_path)
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        approved_sources = load_approved_fallback_sources(source_config_path)
+
+        report = build_fallback_plan(
+            funds=selected_funds,
+            outputs=outputs,
+            database_path=database_path,
+            approved_sources=approved_sources,
+        )
+
+        write_fallback_plan(
+            report=report,
+            path=report_path,
+        )
+    except (
+        InputFileError,
+        OutputFileError,
+        DatabaseError,
+        FallbackSourceConfigError,
+        FallbackPlanError,
+    ) as exc:
+        typer.echo(
+            f"Fallback planning failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Funds considered: {report.funds_considered}")
+
+    typer.echo(f"Funds requiring fallback: {report.funds_requiring_fallback}")
+
+    typer.echo("Missing fields:")
+
+    for field_name, count in report.missing_field_counts.items():
+        typer.echo(f"- {field_name}: {count}")
+
+    typer.echo(f"Approved sources: {len(approved_sources)}")
 
     typer.echo(f"Report file: {report_path}")
