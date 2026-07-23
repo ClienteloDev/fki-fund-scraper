@@ -61,6 +61,8 @@ class ReasonCode(StrEnum):
     NOT_PUBLICLY_DISCLOSED = "not_publicly_disclosed"
     NOT_QUANTIFIED = "not_quantified"
     SOURCE_NOT_FOUND = "source_not_found"
+    SCOPE_MISMATCH = "scope_mismatch"
+    CONFLICTING_VALUES = "conflicting_values"
     WEBSITE_UNREACHABLE = "website_unreachable"
     BLOCKED_BY_ROBOTS = "blocked_by_robots"
     CAPTCHA_REQUIRED = "captcha_required"

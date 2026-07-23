@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from enum import StrEnum
 from typing import Final
 
 from pydantic import HttpUrl
@@ -468,6 +470,53 @@ class Candidate[ValueT]:
     score: int
 
 
+class ScopeVerdict(StrEnum):
+    MATCH = "match"
+    UNKNOWN = "unknown"
+    MISMATCH = "mismatch"
+
+
+SCOPE_MISMATCH_KEYWORDS: Final[tuple[str, ...]] = (
+    "skupina spravuje",
+    "investicni skupina spravuje",
+    "investicni spolecnost spravuje",
+    "obhospodarovatel spravuje",
+    "spravce spravuje",
+    "aktiva ve sprave skupiny",
+    "majetek ve sprave skupiny",
+    "celkovy objem aktiv ve sprave",
+    "vsechny fondy",
+    "napric fondy",
+    "manager manages",
+    "company manages",
+    "group manages",
+    "assets under management of the group",
+    "total assets under management",
+)
+
+
+FUND_NAME_NOISE_TOKENS: Final[frozenset[str]] = frozenset(
+    {
+        "a",
+        "as",
+        "s",
+        "sicav",
+        "fond",
+        "fund",
+        "fonds",
+        "investicni",
+        "investment",
+        "spolecnost",
+        "podfond",
+        "subfund",
+        "otevreny",
+        "uzavreny",
+        "promennym",
+        "kapitalem",
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ExtractedFundFields:
     investment_horizon: FieldResult[InvestmentHorizonValue]
@@ -559,6 +608,11 @@ def extract_investment_horizon(
         missing_detail=(
             "No quantified recommended investment horizon was found in the parsed public sources."
         ),
+        detect_conflicts=True,
+        value_key=lambda value: round(
+            value.recommended_years,
+            6,
+        ),
     )
 
 
@@ -623,6 +677,15 @@ def extract_minimum_investment(
         candidates=candidates,
         documents=documents,
         missing_detail=("No quantified minimum investment was found in the parsed public sources."),
+        detect_conflicts=True,
+        value_key=lambda value: (
+            round(
+                value.amount,
+                2,
+            ),
+            value.currency,
+            value.kind.value,
+        ),
     )
 
 
@@ -700,6 +763,12 @@ def extract_target_return(
             "No explicitly stated target or expected annual return "
             "was found. Historical performance was not used "
             "as a substitute."
+        ),
+        detect_conflicts=True,
+        value_key=lambda value: (
+            value.value_percent_pa,
+            value.minimum_percent_pa,
+            value.maximum_percent_pa,
         ),
     )
 
@@ -835,12 +904,21 @@ def extract_aum(
 
         metric_type = _detect_aum_metric(window.normalized)
 
+        recency_score = min(
+            max(
+                as_of.year - 2000,
+                0,
+            ),
+            50,
+        )
+
         score = (
             _document_priority(
                 window.document,
                 AUM_DOCUMENT_PRIORITY,
             )
             + 80
+            + recency_score
         )
 
         candidates.append(
@@ -1196,6 +1274,14 @@ def _candidate_or_missing[ValueT](
     candidates: list[Candidate[ValueT]],
     documents: list[ExtractionDocument],
     missing_detail: str,
+    detect_conflicts: bool = False,
+    value_key: (
+        Callable[
+            [ValueT],
+            Hashable,
+        ]
+        | None
+    ) = None,
 ) -> FieldResult[ValueT]:
     if not candidates:
         return _missing_result(
@@ -1203,15 +1289,65 @@ def _candidate_or_missing[ValueT](
             detail=missing_detail,
         )
 
-    best_candidate = max(
-        candidates,
-        key=lambda candidate: (
-            candidate.score,
-            candidate.document.record.source_id,
+    candidates_with_scope = [
+        (
+            candidate,
+            _scope_verdict(
+                candidate=candidate,
+                fund_name=fund_name,
+            ),
+        )
+        for candidate in candidates
+    ]
+
+    eligible_candidates = [
+        (
+            candidate,
+            verdict,
+        )
+        for candidate, verdict in candidates_with_scope
+        if verdict is not ScopeVerdict.MISMATCH
+    ]
+
+    if not eligible_candidates:
+        return _scope_mismatch_result(
+            candidates=candidates,
+            documents=documents,
+        )
+
+    ranked_candidates = sorted(
+        eligible_candidates,
+        key=lambda item: (
+            _scope_rank(item[1]),
+            item[0].score,
+            item[0].document.record.source_id,
         ),
+        reverse=True,
     )
 
+    best_candidate, best_scope = ranked_candidates[0]
+
+    if detect_conflicts and value_key is not None:
+        conflicting_candidates = _find_conflicting_candidates(
+            best_candidate=best_candidate,
+            best_scope=best_scope,
+            ranked_candidates=ranked_candidates,
+            value_key=value_key,
+        )
+
+        if conflicting_candidates:
+            return _conflicting_result(
+                best_candidate=best_candidate,
+                conflicting_candidates=(conflicting_candidates),
+                documents=documents,
+            )
+
     confidence = _confidence_from_score(best_candidate.score)
+
+    review_required = confidence is Confidence.LOW or best_scope is ScopeVerdict.UNKNOWN
+
+    if best_scope is ScopeVerdict.UNKNOWN and confidence is Confidence.HIGH:
+        confidence = Confidence.MEDIUM
 
     source_record = best_candidate.document.record
 
@@ -1236,9 +1372,222 @@ def _candidate_or_missing[ValueT](
         extraction=ExtractionMetadata(
             method=ExtractionMethod.REGEX,
             confidence=confidence,
-            review_required=(confidence is Confidence.LOW),
+            review_required=review_required,
         ),
     )
+
+
+def _scope_verdict[ValueT](
+    *,
+    candidate: Candidate[ValueT],
+    fund_name: str,
+) -> ScopeVerdict:
+    normalized_quote = normalize_search_text(candidate.quote)
+
+    if any(keyword in normalized_quote for keyword in SCOPE_MISMATCH_KEYWORDS):
+        return ScopeVerdict.MISMATCH
+
+    record = candidate.document.record
+
+    identity_text = normalize_search_text(
+        " ".join(
+            (
+                record.title or "",
+                record.url,
+                candidate.document.document.full_text[:3000],
+            )
+        )
+    )
+
+    fund_tokens = _fund_identity_tokens(fund_name)
+
+    if not fund_tokens:
+        return ScopeVerdict.UNKNOWN
+
+    matched_tokens = sum(1 for token in fund_tokens if token in identity_text)
+
+    required_matches = (
+        1
+        if len(fund_tokens) == 1
+        else max(
+            2,
+            (len(fund_tokens) + 1) // 2,
+        )
+    )
+
+    if matched_tokens >= required_matches:
+        return ScopeVerdict.MATCH
+
+    return ScopeVerdict.UNKNOWN
+
+
+def _fund_identity_tokens(
+    fund_name: str,
+) -> tuple[str, ...]:
+    normalized = normalize_search_text(fund_name)
+
+    raw_tokens = re.findall(
+        r"[a-z0-9]+",
+        normalized,
+    )
+
+    result: list[str] = []
+
+    for token in raw_tokens:
+        if token in FUND_NAME_NOISE_TOKENS:
+            continue
+
+        if len(token) < 2:
+            continue
+
+        if token not in result:
+            result.append(token)
+
+    return tuple(result)
+
+
+def _scope_rank(
+    verdict: ScopeVerdict,
+) -> int:
+    if verdict is ScopeVerdict.MATCH:
+        return 2
+
+    if verdict is ScopeVerdict.UNKNOWN:
+        return 1
+
+    return 0
+
+
+def _find_conflicting_candidates[ValueT](
+    *,
+    best_candidate: Candidate[ValueT],
+    best_scope: ScopeVerdict,
+    ranked_candidates: Sequence[
+        tuple[
+            Candidate[ValueT],
+            ScopeVerdict,
+        ]
+    ],
+    value_key: Callable[
+        [ValueT],
+        Hashable,
+    ],
+) -> list[Candidate[ValueT]]:
+    best_key = value_key(best_candidate.value)
+
+    conflicts: list[Candidate[ValueT]] = []
+
+    for candidate, scope in ranked_candidates[1:]:
+        if candidate.document.record.source_id == best_candidate.document.record.source_id:
+            continue
+
+        if scope is not best_scope:
+            continue
+
+        if candidate.score < best_candidate.score - 20:
+            continue
+
+        if value_key(candidate.value) == best_key:
+            continue
+
+        conflicts.append(candidate)
+
+    return conflicts
+
+
+def _scope_mismatch_result[ValueT](
+    *,
+    candidates: list[Candidate[ValueT]],
+    documents: list[ExtractionDocument],
+) -> FieldResult[ValueT]:
+    return FieldResult[ValueT](
+        status=FieldStatus.AMBIGUOUS,
+        reason=MissingReason(
+            code=ReasonCode.SCOPE_MISMATCH,
+            detail=(
+                "Quantified values were found, but their evidence "
+                "appears to describe the investment manager, group "
+                "or multiple funds rather than the exact fund."
+            ),
+        ),
+        attempted_sources=_candidate_source_attempts(
+            candidates=candidates,
+            fallback_documents=documents,
+            outcome=ReasonCode.SCOPE_MISMATCH,
+        ),
+    )
+
+
+def _conflicting_result[ValueT](
+    *,
+    best_candidate: Candidate[ValueT],
+    conflicting_candidates: list[Candidate[ValueT]],
+    documents: list[ExtractionDocument],
+) -> FieldResult[ValueT]:
+    all_candidates = [
+        best_candidate,
+        *conflicting_candidates,
+    ]
+
+    return FieldResult[ValueT](
+        status=FieldStatus.CONFLICTING,
+        reason=MissingReason(
+            code=ReasonCode.CONFLICTING_VALUES,
+            detail=(
+                "Multiple similarly reliable fund-level sources "
+                "contain materially different values. The field "
+                "requires source-date, share-class or manual review."
+            ),
+        ),
+        attempted_sources=_candidate_source_attempts(
+            candidates=all_candidates,
+            fallback_documents=documents,
+            outcome=ReasonCode.CONFLICTING_VALUES,
+        ),
+    )
+
+
+def _candidate_source_attempts[ValueT](
+    *,
+    candidates: list[Candidate[ValueT]],
+    fallback_documents: list[ExtractionDocument],
+    outcome: ReasonCode,
+) -> list[SourceAttempt]:
+    attempts: list[SourceAttempt] = []
+
+    seen_urls: set[str] = set()
+
+    for candidate in candidates:
+        record = candidate.document.record
+
+        if record.url in seen_urls:
+            continue
+
+        seen_urls.add(record.url)
+
+        attempts.append(
+            SourceAttempt(
+                url=HttpUrl(record.url),
+                retrieved_at=_source_datetime(record),
+                outcome=outcome,
+                document_type=_document_type(record.document_type),
+                detail=candidate.quote,
+            )
+        )
+
+    if attempts:
+        return attempts
+
+    return [
+        SourceAttempt(
+            url=HttpUrl(document.record.url),
+            retrieved_at=_source_datetime(document.record),
+            outcome=outcome,
+            document_type=_document_type(document.record.document_type),
+            detail=("The source was reviewed during scope and conflict validation."),
+        )
+        for document in fallback_documents
+    ]
 
 
 def _missing_result[ValueT](

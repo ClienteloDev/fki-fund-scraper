@@ -191,3 +191,24 @@ Diagnostika adaptéru:
 uv run fundscraper inspect-adapter `
     "AVANT Finance SICAV a. s."
 ```
+
+## Kontrola scope a konfliktů
+
+Extrakce nerozhoduje pouze podle první nalezené hodnoty.
+
+Před uložením se kontroluje:
+
+- zda hodnota patří konkrétnímu fondu,
+- zda text nepopisuje správce nebo celou skupinu,
+- zda dva podobně důvěryhodné zdroje neobsahují různé hodnoty,
+- zda AUM obsahuje datum a zda je vybrána aktuálnější hodnota.
+
+Možné výsledky:
+
+- `found`,
+- `not_found`,
+- `ambiguous`,
+- `conflicting`,
+- `error`.
+
+Hodnota správce nebo skupiny se nesmí automaticky použít jako hodnota konkrétního fondu.

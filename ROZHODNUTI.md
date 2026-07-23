@@ -51,3 +51,7 @@ Nenalezená hodnota nevede k neřízenému internetovému hledání. Planner vyt
 ## Doménové adaptéry
 
 Weby správců s více fondy vyžadují identifikaci přesné fund-level sekce. AVANT adaptér používá centrální katalog, normalizovaný název fondu a nejmenší odpovídající HTML kontejner. Obecné dokumenty správce a nerelevantní korporátní přílohy jsou filtrovány.
+
+## Scope a konflikty
+
+Kandidátní hodnoty jsou kontrolovány proti identitě fondu. Text popisující správce, skupinu nebo více fondů je označen jako `ambiguous`. Rozdílné hodnoty ze stejně důvěryhodných fund-level zdrojů jsou označeny jako `conflicting`. AUM z různých dat není automaticky konflikt; preferuje se aktuálnější hodnota.

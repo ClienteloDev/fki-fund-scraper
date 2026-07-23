@@ -15,6 +15,7 @@ from fundscraper.field_extraction import (
 from fundscraper.output_models import (
     AumMetricType,
     FieldStatus,
+    ReasonCode,
 )
 
 
@@ -125,3 +126,136 @@ def test_returns_structured_missing_results() -> None:
     assert result.fees.status is FieldStatus.NOT_FOUND
 
     assert result.assets_under_management.status is FieldStatus.NOT_FOUND
+
+
+def create_extraction_document(
+    *,
+    source_id: int,
+    url: str,
+    title: str,
+    text: str,
+    document_type: str = "memorandum",
+) -> ExtractionDocument:
+    parsed_document = ParsedDocument(
+        document_format=DocumentFormat.PDF,
+        parser_name="pymupdf",
+        pages=(
+            ParsedPage(
+                page_number=1,
+                text=text,
+                character_count=len(text),
+            ),
+        ),
+        character_count=len(text),
+        scanned_candidate=False,
+    )
+
+    record = ParsedDocumentRecord(
+        source_id=source_id,
+        fund_id="fund_0123456789abcdef",
+        url=url,
+        title=title,
+        document_type=document_type,
+        content_type="application/pdf",
+        retrieved_at="2026-07-23T12:00:00+00:00",
+        document_format="pdf",
+        parser_name="pymupdf",
+        page_count=1,
+        character_count=len(text),
+        scanned_candidate=False,
+        text_path=f"cache/parsed/{source_id}.json",
+        parsed_at="2026-07-23T12:01:00+00:00",
+    )
+
+    return ExtractionDocument(
+        record=record,
+        document=parsed_document,
+    )
+
+
+def test_marks_conflicting_target_returns() -> None:
+    first_document = create_extraction_document(
+        source_id=1,
+        url="https://example.com/memorandum.pdf",
+        title="Example Fund memorandum",
+        text=("Example Fund SICAV a.s.\nCilovy vynos fondu je 8 % p.a."),
+    )
+
+    second_document = create_extraction_document(
+        source_id=2,
+        url="https://example.com/factsheet.pdf",
+        title="Example Fund factsheet",
+        text=("Example Fund SICAV a.s.\nCilovy vynos fondu je 12 % p.a."),
+        document_type="factsheet",
+    )
+
+    result = extract_fund_fields(
+        fund_name="Example Fund SICAV a.s.",
+        documents=[
+            first_document,
+            second_document,
+        ],
+    )
+
+    assert result.target_return.status is FieldStatus.CONFLICTING
+
+    assert result.target_return.reason is not None
+
+    assert result.target_return.reason.code is ReasonCode.CONFLICTING_VALUES
+
+    assert len(result.target_return.attempted_sources) == 2
+
+
+def test_rejects_manager_level_value() -> None:
+    document = create_extraction_document(
+        source_id=1,
+        url="https://manager.example.com/products",
+        title="Manager product overview",
+        text=("Skupina spravuje vsechny fondy.\nMinimalni investice cini 1 000 000 Kc."),
+        document_type="marketing_page",
+    )
+
+    result = extract_fund_fields(
+        fund_name="Example Fund SICAV a.s.",
+        documents=[
+            document,
+        ],
+    )
+
+    assert result.minimum_investment.status is FieldStatus.AMBIGUOUS
+
+    assert result.minimum_investment.reason is not None
+
+    assert result.minimum_investment.reason.code is ReasonCode.SCOPE_MISMATCH
+
+
+def test_accepts_same_value_from_multiple_sources() -> None:
+    first_document = create_extraction_document(
+        source_id=1,
+        url="https://example.com/kid.pdf",
+        title="Example Fund KID",
+        text=("Example Fund SICAV a.s.\nDoporuceny investicni horizont je 5 let."),
+        document_type="priips_kid",
+    )
+
+    second_document = create_extraction_document(
+        source_id=2,
+        url="https://example.com/statute.pdf",
+        title="Example Fund statute",
+        text=("Example Fund SICAV a.s.\nInvesticni horizont je 5 let."),
+        document_type="statute",
+    )
+
+    result = extract_fund_fields(
+        fund_name="Example Fund SICAV a.s.",
+        documents=[
+            first_document,
+            second_document,
+        ],
+    )
+
+    assert result.investment_horizon.status is FieldStatus.FOUND
+
+    assert result.investment_horizon.value is not None
+
+    assert result.investment_horizon.value.recommended_years == 5
