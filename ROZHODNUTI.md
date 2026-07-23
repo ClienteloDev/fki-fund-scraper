@@ -15,3 +15,7 @@ Hodnota není reprezentována pouze číslem nebo `null`. Každý údaj má stav
 ## Stabilní identifikátor
 
 Interní `fund_id` vzniká deterministicky z názvu a normalizované URL. Opakovaný běh proto vytvoří stejné identifikátory.
+
+## SQLite pracovní databáze
+
+SQLite uchovává průběh, zdroje a chyby. Umožňuje přerušení a obnovení zpracování bez opakovaného stahování. Databáze je runtime soubor v `cache/` a není commitována.

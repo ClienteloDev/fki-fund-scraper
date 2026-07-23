@@ -23,6 +23,14 @@ htmlcov/
 cache/*
 !cache/.gitkeep
 
+# SQLite runtime files
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.db-wal
+*.db-shm
+
 # Generated output
 data/output/*
 !data/output/.gitkeep

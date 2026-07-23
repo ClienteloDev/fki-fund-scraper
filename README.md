@@ -35,3 +35,11 @@ Validace vstupního souboru:
 ```powershell
 uv run fundscraper validate-input data/input/funds.json
 ```
+
+## Pracovní databáze
+
+Průběh zpracování se ukládá do lokální SQLite databáze:
+
+```text
+cache/fundscraper.sqlite3
+```

@@ -6,6 +6,14 @@ from typing import Annotated
 
 import typer
 
+from fundscraper.database import (
+    DatabaseError,
+    get_database_status,
+    initialize_database,
+    register_funds,
+    reset_database,
+    validate_database,
+)
 from fundscraper.input_loader import InputFileError, load_funds
 from fundscraper.normalization import canonical_domain, canonical_url
 from fundscraper.output_service import (
@@ -167,3 +175,118 @@ def generate_schema(
     write_output_schema(output_path)
 
     typer.echo(f"Schema file: {output_path}")
+
+
+@app.command("init-db")
+def init_db(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to the source funds.json file.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="Path to the SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    reset: Annotated[
+        bool,
+        typer.Option(
+            "--reset",
+            help="Delete the existing database before initialization.",
+        ),
+    ] = False,
+) -> None:
+    """Initialize the processing database and register input funds."""
+
+    try:
+        funds = load_funds(input_path)
+
+        if reset:
+            reset_database(database_path)
+
+        initialize_database(database_path)
+
+        registered_count = register_funds(
+            database_path,
+            funds,
+        )
+    except (InputFileError, DatabaseError) as exc:
+        typer.echo(
+            f"Database initialization failed: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Database file: {database_path}")
+    typer.echo(f"Funds registered: {registered_count}")
+    typer.echo("Database initialization passed.")
+
+
+@app.command("db-status")
+def db_status(
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="Path to the SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+) -> None:
+    """Display processing database statistics."""
+
+    try:
+        status = get_database_status(database_path)
+    except DatabaseError as exc:
+        typer.echo(
+            f"Database status failed: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Database file: {database_path}")
+    typer.echo(f"Schema version: {status.schema_version}")
+    typer.echo(f"Funds total: {status.funds_total}")
+    typer.echo(f"Funds pending: {status.funds_pending}")
+    typer.echo(f"Funds in progress: {status.funds_in_progress}")
+    typer.echo(f"Funds completed: {status.funds_completed}")
+    typer.echo(f"Funds partial: {status.funds_partial}")
+    typer.echo(f"Funds failed: {status.funds_failed}")
+    typer.echo(f"Sources total: {status.sources_total}")
+    typer.echo(f"Attempts total: {status.attempts_total}")
+
+
+@app.command("validate-db")
+def validate_db(
+    database_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to the SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+) -> None:
+    """Validate SQLite integrity and foreign-key relationships."""
+
+    try:
+        validate_database(database_path)
+    except DatabaseError as exc:
+        typer.echo(
+            f"Database validation failed: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Database file: {database_path}")
+    typer.echo("Database validation passed.")

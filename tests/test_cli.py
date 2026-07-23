@@ -89,10 +89,10 @@ def test_init_and_validate_output_commands(
         ],
     )
 
-    assert init_result.exit_code == 0
+    assert init_result.exit_code == 0, init_result.output
     assert "Funds initialized: 1" in init_result.stdout
 
-    assert validate_result.exit_code == 0
+    assert validate_result.exit_code == 0, validate_result.output
     assert "Output validation passed." in validate_result.stdout
 
 
@@ -113,3 +113,52 @@ def test_generate_schema_command(
     assert result.exit_code == 0
     assert schema_path.exists()
     assert "Schema file:" in result.stdout
+
+
+def test_database_commands(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "funds.json"
+
+    database_path = tmp_path / "fundscraper.sqlite3"
+
+    write_input(input_path)
+
+    init_result = runner.invoke(
+        app,
+        [
+            "init-db",
+            "--input",
+            str(input_path),
+            "--database",
+            str(database_path),
+        ],
+    )
+
+    status_result = runner.invoke(
+        app,
+        [
+            "db-status",
+            "--database",
+            str(database_path),
+        ],
+    )
+
+    validate_result = runner.invoke(
+        app,
+        [
+            "validate-db",
+            str(database_path),
+        ],
+    )
+
+    assert init_result.exit_code == 0, init_result.output
+    assert "Funds registered: 1" in init_result.stdout
+    assert "Database initialization passed." in init_result.stdout
+
+    assert status_result.exit_code == 0, status_result.output
+    assert "Funds total: 1" in status_result.stdout
+    assert "Funds pending: 1" in status_result.stdout
+
+    assert validate_result.exit_code == 0, validate_result.output
+    assert "Database validation passed." in validate_result.stdout
