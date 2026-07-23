@@ -86,3 +86,24 @@ Spuštění pro jeden fond:
 uv run fundscraper discover-start-page `
     "3M FUND MSI SICAV a.s."
 ```
+
+## Vícestránkový crawler
+
+Crawler prochází vybrané stránky stejné domény. Stránky vybírá podle:
+
+- názvu fondu,
+- textu odkazu,
+- URL,
+- sekcí pro investory,
+- sekcí dokumentů,
+- typu nalezeného odkazu.
+
+Crawler má omezenou hloubku, maximální počet stránek a maximální počet stahovaných dokumentů.
+
+```powershell
+uv run fundscraper crawl-fund `
+    "3M FUND MSI SICAV a.s." `
+    --max-pages 20 `
+    --max-depth 2 `
+    --max-documents 20
+```

@@ -11,6 +11,11 @@ from fundscraper.config import (
     ConfigurationError,
     HttpSettings,
 )
+from fundscraper.crawl_service import (
+    CrawlError,
+    CrawlSummary,
+    crawl_fund_site,
+)
 from fundscraper.database import (
     DatabaseError,
     get_database_status,
@@ -551,3 +556,157 @@ def discover_start_page_command(
         typer.echo(f"   URL: {candidate.url}")
         typer.echo(f"   Direct document: {candidate.direct_document}")
         typer.echo(f"   Same domain: {candidate.same_domain}")
+
+
+@app.command("crawl-fund")
+def crawl_fund_command(
+    fund_name: Annotated[
+        str,
+        typer.Argument(
+            help="Exact fund name from funds.json.",
+        ),
+    ],
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="HTTP cache directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    max_pages: Annotated[
+        int,
+        typer.Option(
+            "--max-pages",
+            min=1,
+            max=100,
+        ),
+    ] = 25,
+    max_depth: Annotated[
+        int,
+        typer.Option(
+            "--max-depth",
+            min=0,
+            max=5,
+        ),
+    ] = 2,
+    max_documents: Annotated[
+        int,
+        typer.Option(
+            "--max-documents",
+            min=0,
+            max=100,
+        ),
+    ] = 20,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore cached HTTP responses.",
+        ),
+    ] = False,
+) -> None:
+    """Crawl one fund website and download relevant documents."""
+
+    summary: CrawlSummary
+
+    try:
+        funds = load_funds(input_path)
+
+        matching_funds = [fund for fund in funds if (fund.name.casefold() == fund_name.casefold())]
+
+        if not matching_funds:
+            typer.echo(
+                f"Fund was not found: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        if len(matching_funds) > 1:
+            typer.echo(
+                f"Fund name is not unique: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        fund = matching_funds[0]
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        settings = HttpSettings.from_environment()
+
+        async def run_crawler() -> CrawlSummary:
+            async with HttpFetcher(
+                settings,
+                cache_directory,
+            ) as fetcher:
+                return await crawl_fund_site(
+                    database_path=database_path,
+                    fund=fund,
+                    fetcher=fetcher,
+                    max_pages=max_pages,
+                    max_depth=max_depth,
+                    max_documents=max_documents,
+                    force=force,
+                )
+
+        summary = asyncio.run(run_crawler())
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        FetchError,
+        CrawlError,
+    ) as exc:
+        typer.echo(
+            f"Fund crawl failed: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Fund: {summary.fund_name}")
+    typer.echo(f"Pages visited: {summary.pages_visited}")
+    typer.echo(f"HTML pages parsed: {summary.html_pages_parsed}")
+    typer.echo(f"Documents discovered: {summary.documents_discovered}")
+    typer.echo(f"Documents downloaded: {summary.documents_downloaded}")
+    typer.echo(f"Failures: {len(summary.failures)}")
+
+    for index, document in enumerate(
+        summary.document_candidates[:20],
+        start=1,
+    ):
+        typer.echo("")
+        typer.echo(f"{index}. [{document.score}] {document.document_type.value}")
+        typer.echo(f"   {document.text or '-'}")
+        typer.echo(f"   {document.url}")
+
+    if summary.failures:
+        typer.echo("")
+        typer.echo("Failures:")
+
+        for failure in summary.failures:
+            typer.echo(f"- {failure.stage}: {failure.url}: {failure.error_code}")

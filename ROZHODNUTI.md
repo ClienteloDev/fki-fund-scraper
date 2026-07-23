@@ -27,3 +27,7 @@ HTTP požadavky používají asynchronní connection pooling, omezení souběhu,
 ## Discovery dokumentů
 
 HTML stránky se zpracovávají parserem Lexbor. Odkazy jsou hodnoceny deterministickými pravidly podle URL,
+
+## Crawler
+
+Crawler nepokouší procházet celý internet. Zůstává na doméně fondu, používá omezenou hloubku a vybírá stránky podle názvu fondu a dokumentových klíčových slov. Přímé odkazy na dokumenty mohou směřovat i na externí úložiště.
