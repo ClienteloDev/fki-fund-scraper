@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+
+# Testing and code quality
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime cache
+cache/*
+!cache/.gitkeep
+
+# Generated output
+data/output/*
+!data/output/.gitkeep
+
+# Logs
+*.log
+
+# IDE and operating system
+.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+~$*
