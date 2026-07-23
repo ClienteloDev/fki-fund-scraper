@@ -128,3 +128,20 @@ Dokumenty s velmi malým množstvím extrahovaného textu jsou označeny jako mo
 uv run fundscraper parse-fund-documents `
     "3M FUND MSI SICAV a.s."
 ```
+
+## Extrakce údajů
+
+Deterministické extraktory zpracovávají normalizovaný text dokumentů a hledají:
+
+- doporučený investiční horizont,
+- minimální investici,
+- cílový nebo očekávaný výnos,
+- vstupní, výstupní, manažerské a výkonnostní poplatky,
+- datovanou hodnotu majetku fondu.
+
+Historická výkonnost se nepoužívá jako náhrada cílového výnosu. Hodnota majetku se uloží pouze tehdy, pokud obsahuje datum, částku a měnu.
+
+```powershell
+uv run fundscraper extract-fund `
+    "3M FUND MSI SICAV a.s."
+```

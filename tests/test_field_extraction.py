@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+from fundscraper.database import (
+    ParsedDocumentRecord,
+)
+from fundscraper.document_parser import (
+    DocumentFormat,
+    ParsedDocument,
+    ParsedPage,
+)
+from fundscraper.field_extraction import (
+    ExtractionDocument,
+    extract_fund_fields,
+)
+from fundscraper.output_models import (
+    AumMetricType,
+    FieldStatus,
+)
+
+
+def test_extracts_all_supported_fields() -> None:
+    text = """
+    Doporučený investiční horizont je 5 let.
+
+    Minimální investice činí 1 000 000 Kč.
+
+    Cílový výnos fondu je 8 % p.a.
+
+    Vstupní poplatek činí maximálně 3 %.
+    Poplatek za obhospodařování činí 1,5 % ročně.
+    Výkonnostní poplatek činí 20 %.
+
+    Hodnota majetku fondu k 31. 12. 2025
+    činila 2,5 mld. Kč.
+    """.strip()
+
+    parsed_document = ParsedDocument(
+        document_format=DocumentFormat.PDF,
+        parser_name="pymupdf",
+        pages=(
+            ParsedPage(
+                page_number=4,
+                text=text,
+                character_count=len(text),
+            ),
+        ),
+        character_count=len(text),
+        scanned_candidate=False,
+    )
+
+    record = ParsedDocumentRecord(
+        source_id=1,
+        fund_id="fund_0123456789abcdef",
+        url="https://example.com/memorandum.pdf",
+        title="Investiční memorandum",
+        document_type="memorandum",
+        content_type="application/pdf",
+        retrieved_at="2026-07-23T12:00:00+00:00",
+        document_format="pdf",
+        parser_name="pymupdf",
+        page_count=1,
+        character_count=len(text),
+        scanned_candidate=False,
+        text_path="cache/parsed/example.json",
+        parsed_at="2026-07-23T12:01:00+00:00",
+    )
+
+    result = extract_fund_fields(
+        fund_name="Example SICAV a.s.",
+        documents=[
+            ExtractionDocument(
+                record=record,
+                document=parsed_document,
+            )
+        ],
+    )
+
+    assert result.investment_horizon.status is FieldStatus.FOUND
+
+    assert result.investment_horizon.value is not None
+
+    assert result.investment_horizon.value.recommended_years == 5
+
+    assert result.minimum_investment.status is FieldStatus.FOUND
+
+    assert result.minimum_investment.value is not None
+
+    assert result.minimum_investment.value.amount == 1_000_000
+
+    assert result.minimum_investment.value.currency == "CZK"
+
+    assert result.target_return.status is FieldStatus.FOUND
+
+    assert result.target_return.value is not None
+
+    assert result.target_return.value.value_percent_pa == 8
+
+    assert result.fees.status is FieldStatus.FOUND
+    assert result.fees.value is not None
+    assert len(result.fees.value.items) == 3
+
+    assert result.assets_under_management.status is FieldStatus.FOUND
+
+    assert result.assets_under_management.value is not None
+
+    assert result.assets_under_management.value.amount == 2_500_000_000
+
+    assert result.assets_under_management.value.metric_type is AumMetricType.FUND_AUM
+
+    assert result.assets_under_management.value.as_of.isoformat() == "2025-12-31"
+
+
+def test_returns_structured_missing_results() -> None:
+    result = extract_fund_fields(
+        fund_name="Empty Fund",
+        documents=[],
+    )
+
+    assert result.investment_horizon.status is FieldStatus.NOT_FOUND
+
+    assert result.minimum_investment.status is FieldStatus.NOT_FOUND
+
+    assert result.target_return.status is FieldStatus.NOT_FOUND
+
+    assert result.fees.status is FieldStatus.NOT_FOUND
+
+    assert result.assets_under_management.status is FieldStatus.NOT_FOUND

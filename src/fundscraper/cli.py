@@ -35,6 +35,11 @@ from fundscraper.document_service import (
     DocumentParsingSummary,
     parse_fund_documents,
 )
+from fundscraper.extraction_service import (
+    ExtractionServiceError,
+    ExtractionSummary,
+    extract_fund_data,
+)
 from fundscraper.fetch_service import (
     fetch_fund_start_page,
 )
@@ -832,3 +837,100 @@ def parse_fund_documents_command(
                 f"{failure.error_code}: "
                 f"{failure.message}"
             )
+
+
+@app.command("extract-fund")
+def extract_fund_command(
+    fund_name: Annotated[
+        str,
+        typer.Argument(
+            help="Exact fund name from funds.json.",
+        ),
+    ],
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Enriched output JSON file.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.enriched.json"),
+) -> None:
+    """Extract five supported fields for one parsed fund."""
+
+    summary: ExtractionSummary
+
+    try:
+        funds = load_funds(input_path)
+
+        matching_funds = [fund for fund in funds if (fund.name.casefold() == fund_name.casefold())]
+
+        if not matching_funds:
+            typer.echo(
+                f"Fund was not found: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        if len(matching_funds) > 1:
+            typer.echo(
+                f"Fund name is not unique: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        fund = matching_funds[0]
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        summary = extract_fund_data(
+            database_path=database_path,
+            output_path=output_path,
+            fund=fund,
+        )
+    except (
+        InputFileError,
+        DatabaseError,
+        ExtractionServiceError,
+    ) as exc:
+        typer.echo(
+            f"Fund extraction failed: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Fund: {summary.fund_name}")
+    typer.echo(f"Parsed documents: {summary.parsed_documents}")
+    typer.echo(f"Fields found: {summary.fields_found}/5")
+    typer.echo(f"Fields missing: {summary.fields_missing}/5")
+
+    for field_name, status in summary.field_statuses:
+        typer.echo(f"- {field_name}: {status.value}")
+
+    typer.echo(f"Warnings: {len(summary.warnings)}")
+    typer.echo(f"Output file: {summary.output_path}")

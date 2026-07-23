@@ -1,0 +1,206 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+from fundscraper.database import (
+    AttemptStatus,
+    DatabaseError,
+    list_parsed_documents,
+    record_attempt,
+)
+from fundscraper.document_parser import (
+    DocumentParseError,
+    load_parsed_document,
+)
+from fundscraper.field_extraction import (
+    ExtractionDocument,
+    extract_fund_fields,
+)
+from fundscraper.models import FundInput
+from fundscraper.output_models import (
+    FieldStatus,
+    ProcessingMetadata,
+    ProcessingStatus,
+)
+from fundscraper.output_service import (
+    OutputFileError,
+    load_output,
+    stable_fund_id,
+    write_output,
+)
+
+
+class ExtractionServiceError(RuntimeError):
+    """Raised when fund field extraction cannot be completed."""
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionSummary:
+    fund_id: str
+    fund_name: str
+    parsed_documents: int
+    fields_found: int
+    fields_missing: int
+    field_statuses: tuple[
+        tuple[
+            str,
+            FieldStatus,
+        ],
+        ...,
+    ]
+    warnings: tuple[str, ...]
+    output_path: Path
+
+
+def extract_fund_data(
+    *,
+    database_path: Path,
+    output_path: Path,
+    fund: FundInput,
+) -> ExtractionSummary:
+    """Extract supported fields and update one fund in output JSON."""
+
+    fund_id = stable_fund_id(fund)
+
+    record_attempt(
+        database_path,
+        fund_id=fund_id,
+        stage="extract_fields",
+        status=AttemptStatus.STARTED,
+        url=fund.web,
+    )
+
+    warnings: list[str] = []
+
+    try:
+        records = list_parsed_documents(
+            database_path,
+            fund_id=fund_id,
+        )
+
+        documents: list[ExtractionDocument] = []
+
+        for record in records:
+            try:
+                parsed_document = load_parsed_document(Path(record.text_path))
+            except DocumentParseError as exc:
+                warnings.append(f"Source {record.source_id} could not be loaded: {exc}")
+
+                continue
+
+            documents.append(
+                ExtractionDocument(
+                    record=record,
+                    document=parsed_document,
+                )
+            )
+
+        extracted = extract_fund_fields(
+            fund_name=fund.name,
+            documents=documents,
+        )
+
+        field_statuses = (
+            (
+                "investment_horizon",
+                extracted.investment_horizon.status,
+            ),
+            (
+                "minimum_investment",
+                extracted.minimum_investment.status,
+            ),
+            (
+                "target_return",
+                extracted.target_return.status,
+            ),
+            (
+                "fees",
+                extracted.fees.status,
+            ),
+            (
+                "assets_under_management",
+                extracted.assets_under_management.status,
+            ),
+        )
+
+        fields_found = sum(1 for _, status in field_statuses if status is FieldStatus.FOUND)
+
+        outputs = load_output(output_path)
+
+        matching_index = next(
+            (index for index, item in enumerate(outputs) if item.fund_id == fund_id),
+            None,
+        )
+
+        if matching_index is None:
+            raise ExtractionServiceError(f"Fund does not exist in output file: {fund.name}")
+
+        processing_status = (
+            ProcessingStatus.COMPLETED if fields_found == 5 else ProcessingStatus.PARTIAL
+        )
+
+        current_output = outputs[matching_index]
+
+        outputs[matching_index] = current_output.model_copy(
+            update={
+                "investment_horizon": (extracted.investment_horizon),
+                "minimum_investment": (extracted.minimum_investment),
+                "target_return": (extracted.target_return),
+                "fees": extracted.fees,
+                "assets_under_management": (extracted.assets_under_management),
+                "processing": ProcessingMetadata(
+                    status=processing_status,
+                    updated_at=datetime.now(UTC),
+                    warnings=warnings,
+                ),
+            }
+        )
+
+        write_output(
+            output_path,
+            outputs,
+            overwrite=True,
+        )
+    except (
+        DatabaseError,
+        OutputFileError,
+        ExtractionServiceError,
+    ) as exc:
+        record_attempt(
+            database_path,
+            fund_id=fund_id,
+            stage="extract_fields",
+            status=AttemptStatus.FAILED,
+            url=fund.web,
+            error_code="field_extraction_error",
+            error_message=str(exc),
+        )
+
+        if isinstance(
+            exc,
+            ExtractionServiceError,
+        ):
+            raise
+
+        raise ExtractionServiceError(f"Could not extract fund fields: {exc}") from exc
+
+    record_attempt(
+        database_path,
+        fund_id=fund_id,
+        stage="extract_fields",
+        status=AttemptStatus.SUCCEEDED,
+        url=fund.web,
+    )
+
+    return ExtractionSummary(
+        fund_id=fund_id,
+        fund_name=fund.name,
+        parsed_documents=len(documents),
+        fields_found=fields_found,
+        fields_missing=5 - fields_found,
+        field_statuses=field_statuses,
+        warnings=tuple(warnings),
+        output_path=output_path,
+    )

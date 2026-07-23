@@ -197,8 +197,10 @@ class ParsedDocumentRecord:
     source_id: int
     fund_id: str
     url: str
+    title: str | None
     document_type: str | None
     content_type: str | None
+    retrieved_at: str | None
     document_format: str
     parser_name: str
     page_count: int
@@ -730,7 +732,7 @@ def list_parsed_documents(
     *,
     fund_id: str,
 ) -> list[ParsedDocumentRecord]:
-    """Return parsed documents available for extraction."""
+    """Return parsed documents available for field extraction."""
 
     try:
         with closing(connect_database(path)) as connection:
@@ -745,8 +747,10 @@ def list_parsed_documents(
                     parsed.source_id,
                     parsed.fund_id,
                     sources.url,
+                    sources.title,
                     sources.document_type,
                     sources.content_type,
+                    sources.retrieved_at,
                     parsed.document_format,
                     parsed.parser_name,
                     parsed.page_count,
@@ -770,15 +774,17 @@ def list_parsed_documents(
             source_id=int(row[0]),
             fund_id=str(row[1]),
             url=str(row[2]),
-            document_type=(str(row[3]) if row[3] is not None else None),
-            content_type=(str(row[4]) if row[4] is not None else None),
-            document_format=str(row[5]),
-            parser_name=str(row[6]),
-            page_count=int(row[7]),
-            character_count=int(row[8]),
-            scanned_candidate=bool(row[9]),
-            text_path=str(row[10]),
-            parsed_at=str(row[11]),
+            title=(str(row[3]) if row[3] is not None else None),
+            document_type=(str(row[4]) if row[4] is not None else None),
+            content_type=(str(row[5]) if row[5] is not None else None),
+            retrieved_at=(str(row[6]) if row[6] is not None else None),
+            document_format=str(row[7]),
+            parser_name=str(row[8]),
+            page_count=int(row[9]),
+            character_count=int(row[10]),
+            scanned_candidate=bool(row[11]),
+            text_path=str(row[12]),
+            parsed_at=str(row[13]),
         )
         for row in rows
     ]

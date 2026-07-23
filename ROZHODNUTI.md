@@ -35,3 +35,7 @@ Crawler nepokouší procházet celý internet. Zůstává na doméně fondu, pou
 ## Parsování dokumentů
 
 PDF se extrahuje po stránkách pomocí PyMuPDF, aby bylo možné uvádět číslo stránky u evidence. HTML a XHTML se převádějí na viditelný text pomocí selectolax. Skenované PDF se zatím pouze označí; OCR bude použito jen jako fallback, protože je pomalejší a méně přesné.
+
+## Extrakce polí
+
+První extrakční vrstva používá deterministické regulární výrazy a dokumentové priority. Historická výkonnost se nezaměňuje za cílový výnos. AUM vyžaduje explicitní datum, částku a měnu. Nenalezené hodnoty jsou ukládány se strukturovaným důvodem a seznamem prohledaných zdrojů.

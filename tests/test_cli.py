@@ -225,3 +225,24 @@ def test_parse_fund_documents_reports_missing_fund(
 
     assert result.exit_code == 1
     assert "Fund was not found:" in result.output
+
+
+def test_extract_fund_reports_missing_fund(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "funds.json"
+
+    write_input(input_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "extract-fund",
+            "Unknown Fund",
+            "--input",
+            str(input_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Fund was not found:" in result.output
