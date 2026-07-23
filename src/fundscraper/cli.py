@@ -19,8 +19,15 @@ from fundscraper.database import (
     reset_database,
     validate_database,
 )
+from fundscraper.discovery_service import (
+    DiscoverySummary,
+    discover_fund_start_page,
+)
 from fundscraper.fetch_service import (
     fetch_fund_start_page,
+)
+from fundscraper.html_discovery import (
+    HtmlDiscoveryError,
 )
 from fundscraper.http_client import (
     FetchError,
@@ -414,3 +421,133 @@ def fetch_start_page_command(
     typer.echo(f"SHA-256: {result.sha256}")
     typer.echo(f"Cache hit: {result.from_cache}")
     typer.echo(f"Local file: {result.local_path}")
+
+
+@app.command("discover-start-page")
+def discover_start_page_command(
+    fund_name: Annotated[
+        str,
+        typer.Argument(
+            help="Exact name of the fund from funds.json.",
+        ),
+    ],
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to the source funds.json file.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="Path to the SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="Directory used for downloaded response cache.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore cached start page and download it again.",
+        ),
+    ] = False,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            min=1,
+            max=100,
+            help="Maximum number of candidates printed.",
+        ),
+    ] = 20,
+) -> None:
+    """Discover relevant document links on one fund start page."""
+
+    summary: DiscoverySummary
+
+    try:
+        funds = load_funds(input_path)
+
+        matching_funds = [fund for fund in funds if fund.name.casefold() == fund_name.casefold()]
+
+        if not matching_funds:
+            typer.echo(
+                f"Fund was not found: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        if len(matching_funds) > 1:
+            typer.echo(
+                f"Fund name is not unique: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        fund = matching_funds[0]
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        settings = HttpSettings.from_environment()
+
+        async def run_discovery() -> DiscoverySummary:
+            async with HttpFetcher(
+                settings,
+                cache_directory,
+            ) as fetcher:
+                return await discover_fund_start_page(
+                    database_path=database_path,
+                    fund=fund,
+                    fetcher=fetcher,
+                    force=force,
+                )
+
+        summary = asyncio.run(run_discovery())
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        FetchError,
+        HtmlDiscoveryError,
+    ) as exc:
+        typer.echo(
+            f"Start page discovery failed: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Fund: {summary.fund_name}")
+    typer.echo(f"Page URL: {summary.page_url}")
+    typer.echo(f"Page title: {summary.page_title or '-'}")
+    typer.echo(f"Links inspected: {summary.links_total}")
+    typer.echo(f"Candidates found: {len(summary.candidates)}")
+
+    for index, candidate in enumerate(
+        summary.candidates[:limit],
+        start=1,
+    ):
+        typer.echo("")
+        typer.echo(f"{index}. [{candidate.score}] {candidate.document_type.value}")
+        typer.echo(f"   Text: {candidate.text or '-'}")
+        typer.echo(f"   URL: {candidate.url}")
+        typer.echo(f"   Direct document: {candidate.direct_document}")
+        typer.echo(f"   Same domain: {candidate.same_domain}")

@@ -62,3 +62,27 @@ Stažení startovní stránky jednoho fondu:
 ```powershell
 uv run fundscraper fetch-start-page "3M FUND MSI SICAV a.s."
 ```
+
+## Objevování dokumentů
+
+Startovní HTML stránka fondu se analyzuje pomocí HTML parseru. Relativní odkazy se převádějí na absolutní URL a hodnotí se podle textu odkazu, URL, typu souboru a domény.
+
+Rozpoznávané dokumenty zahrnují:
+
+- PRIIPs KID,
+- statut fondu,
+- statut podfondu,
+- investiční memorandum,
+- výroční zprávu,
+- pololetní zprávu,
+- účetní závěrku,
+- factsheet,
+- infoletter,
+- obecnou sekci dokumentů.
+
+Spuštění pro jeden fond:
+
+```powershell
+uv run fundscraper discover-start-page `
+    "3M FUND MSI SICAV a.s."
+```

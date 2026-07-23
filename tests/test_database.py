@@ -191,3 +191,37 @@ def test_records_attempt_and_source(
     assert source_id > 0
     assert status.attempts_total == 1
     assert status.sources_total == 1
+
+
+def test_register_funds_removes_stale_records(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "fundscraper.sqlite3"
+
+    funds = sample_funds()
+
+    initialize_database(
+        database_path,
+        now=FIXED_TIME,
+    )
+
+    register_funds(
+        database_path,
+        funds,
+        now=FIXED_TIME,
+    )
+
+    initial_status = get_database_status(database_path)
+
+    assert initial_status.funds_total == 2
+
+    register_funds(
+        database_path,
+        [funds[0]],
+        now=FIXED_TIME,
+    )
+
+    synchronized_status = get_database_status(database_path)
+
+    assert synchronized_status.funds_total == 1
+    assert synchronized_status.funds_pending == 1

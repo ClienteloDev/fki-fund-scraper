@@ -246,7 +246,13 @@ def register_funds(
     *,
     now: datetime | None = None,
 ) -> int:
-    """Insert or update input funds in the processing database."""
+    """
+    Synchronize input funds with the processing database.
+
+    Existing matching funds retain their processing state.
+    Records no longer present in the input are removed together with
+    their dependent sources and attempts.
+    """
 
     timestamp = utc_now_iso(now)
 
@@ -263,6 +269,8 @@ def register_funds(
         for fund in funds
     ]
 
+    current_fund_ids = [(row[0],) for row in rows]
+
     try:
         with closing(connect_database(path)) as connection:
             _ensure_initialized(
@@ -271,6 +279,30 @@ def register_funds(
             )
 
             with connection:
+                connection.execute(
+                    """
+                    CREATE TEMP TABLE IF NOT EXISTS current_input_funds (
+                        fund_id TEXT PRIMARY KEY
+                    )
+                    """
+                )
+
+                connection.execute(
+                    """
+                    DELETE FROM current_input_funds
+                    """
+                )
+
+                connection.executemany(
+                    """
+                    INSERT INTO current_input_funds (
+                        fund_id
+                    )
+                    VALUES (?)
+                    """,
+                    current_fund_ids,
+                )
+
                 connection.executemany(
                     """
                     INSERT INTO funds (
@@ -292,8 +324,18 @@ def register_funds(
                     """,
                     rows,
                 )
+
+                connection.execute(
+                    """
+                    DELETE FROM funds
+                    WHERE fund_id NOT IN (
+                        SELECT fund_id
+                        FROM current_input_funds
+                    )
+                    """
+                )
     except sqlite3.Error as exc:
-        raise DatabaseError(f"Could not register funds in {path}: {exc}") from exc
+        raise DatabaseError(f"Could not synchronize funds in {path}: {exc}") from exc
 
     return len(rows)
 

@@ -162,3 +162,24 @@ def test_database_commands(
 
     assert validate_result.exit_code == 0, validate_result.output
     assert "Database validation passed." in validate_result.stdout
+
+
+def test_discover_start_page_reports_missing_fund(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "funds.json"
+
+    write_input(input_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "discover-start-page",
+            "Unknown Fund",
+            "--input",
+            str(input_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Fund was not found:" in result.output
