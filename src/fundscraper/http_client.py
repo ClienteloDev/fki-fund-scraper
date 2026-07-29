@@ -310,6 +310,11 @@ class HttpFetcher:
             asyncio.Lock,
         ] = {}
 
+        self._domain_semaphores: dict[
+            str,
+            asyncio.Semaphore,
+        ] = {}
+
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(settings.timeout_seconds),
             limits=httpx.Limits(
@@ -397,8 +402,19 @@ class HttpFetcher:
         self,
         url: str,
     ) -> FetchResult:
+        parsed_url = httpx.URL(url)
+        domain_key = parsed_url.host or ""
+
+        domain_semaphore = self._domain_semaphores.setdefault(
+            domain_key,
+            asyncio.Semaphore(
+                self.settings.max_per_domain_concurrency,
+            ),
+        )
+
         async with (
             self._semaphore,
+            domain_semaphore,
             self._limiter,
             self._client.stream(
                 "GET",

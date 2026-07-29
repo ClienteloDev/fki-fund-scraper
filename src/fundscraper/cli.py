@@ -1257,6 +1257,24 @@ def run_sample_command(
             max=100,
         ),
     ] = 20,
+    document_concurrency: Annotated[
+        int,
+        typer.Option(
+            "--document-concurrency",
+            min=1,
+            max=20,
+            help="Maximum concurrent document downloads per fund.",
+        ),
+    ] = 4,
+    concurrency: Annotated[
+        int,
+        typer.Option(
+            "--concurrency",
+            min=1,
+            max=20,
+            help="Maximum funds processed concurrently.",
+        ),
+    ] = 6,
     force: Annotated[
         bool,
         typer.Option(
@@ -1330,6 +1348,8 @@ def run_sample_command(
                     max_pages=max_pages,
                     max_depth=max_depth,
                     max_documents=max_documents,
+                    document_concurrency=document_concurrency,
+                    concurrency=concurrency,
                     force=force,
                     progress_callback=show_progress,
                 )
@@ -1479,6 +1499,24 @@ def run_retry_command(
             max=100,
         ),
     ] = 30,
+    document_concurrency: Annotated[
+        int,
+        typer.Option(
+            "--document-concurrency",
+            min=1,
+            max=20,
+            help="Maximum concurrent document downloads per fund.",
+        ),
+    ] = 4,
+    concurrency: Annotated[
+        int,
+        typer.Option(
+            "--concurrency",
+            min=1,
+            max=20,
+            help="Maximum retry funds processed concurrently.",
+        ),
+    ] = 6,
     minimum_found_improvement: Annotated[
         int,
         typer.Option(
@@ -1498,16 +1536,20 @@ def run_retry_command(
             help=("Use the AVANT catalog as an additional document source."),
         ),
     ] = True,
+    amista_fallback: Annotated[
+        bool,
+        typer.Option(
+            "--amista-fallback/--no-amista-fallback",
+            help="Use the AMISTA catalog as a cross-domain fund-profile source.",
+        ),
+    ] = True,
     porovnejfondy_fallback: Annotated[
         bool,
         typer.Option(
             "--porovnejfondy-fallback/--no-porovnejfondy-fallback",
-            help=(
-                "Use PorovnejFondy.cz as a final fund-page fallback "
-                "after the official website and AVANT."
-            ),
+            help="Use PorovnejFondy.cz as an optional final fund-page fallback.",
         ),
-    ] = True,
+    ] = False,
     force: Annotated[
         bool,
         typer.Option(
@@ -1604,8 +1646,11 @@ def run_retry_command(
                     max_pages=max_pages,
                     max_depth=max_depth,
                     max_documents=max_documents,
+                    document_concurrency=document_concurrency,
+                    concurrency=concurrency,
                     force=force,
                     avant_fallback=avant_fallback,
+                    amista_fallback=amista_fallback,
                     porovnejfondy_fallback=(porovnejfondy_fallback),
                     progress_callback=show_progress,
                 )
@@ -1639,7 +1684,10 @@ def run_retry_command(
         report_payload["merge"] = {
             "minimum_found_improvement": (minimum_found_improvement),
             "avant_fallback": avant_fallback,
+            "amista_fallback": amista_fallback,
             "porovnejfondy_fallback": (porovnejfondy_fallback),
+            "concurrency": concurrency,
+            "document_concurrency": document_concurrency,
             "candidates": merge_summary.candidates,
             "replaced": merge_summary.replaced,
             "preserved": merge_summary.preserved,

@@ -192,3 +192,52 @@ def test_force_bypasses_cache(
     asyncio.run(run_test())
 
     assert calls == 2
+
+
+def test_limits_concurrency_per_domain(
+    tmp_path: Path,
+) -> None:
+    active_requests = 0
+    maximum_active_requests = 0
+
+    async def handler(
+        request: httpx.Request,
+    ) -> httpx.Response:
+        nonlocal active_requests, maximum_active_requests
+
+        active_requests += 1
+        maximum_active_requests = max(
+            maximum_active_requests,
+            active_requests,
+        )
+        await asyncio.sleep(0.03)
+        active_requests -= 1
+
+        return httpx.Response(
+            status_code=200,
+            content=b"ok",
+            request=request,
+        )
+
+    async def run_test() -> None:
+        settings = HttpSettings(
+            max_retries=0,
+            max_concurrency=5,
+            max_per_domain_concurrency=2,
+            requests_per_second=100,
+            retry_min_wait_seconds=0,
+            retry_max_wait_seconds=0,
+        )
+
+        async with HttpFetcher(
+            settings,
+            tmp_path / "http",
+            transport=httpx.MockTransport(handler),
+        ) as fetcher:
+            await asyncio.gather(
+                *(fetcher.fetch(f"https://example.com/{index}") for index in range(5))
+            )
+
+    asyncio.run(run_test())
+
+    assert maximum_active_requests == 2

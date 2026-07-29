@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from fundscraper.domain_adapters.avant import (
-    AvantFundsAdapter,
-)
-from fundscraper.domain_adapters.base import (
-    DomainAdapter,
-)
-from fundscraper.domain_adapters.porovnejfondy import (
-    PorovnejFondyAdapter,
-)
+from fundscraper.domain_adapters.amista import AmistaAdapter
+from fundscraper.domain_adapters.avant import AvantFundsAdapter
+from fundscraper.domain_adapters.base import DomainAdapter
+from fundscraper.domain_adapters.bhs import BhsAdapter
+from fundscraper.domain_adapters.porovnejfondy import PorovnejFondyAdapter
 from fundscraper.models import FundInput
 
+AMISTA_ADAPTER = AmistaAdapter()
 AVANT_ADAPTER = AvantFundsAdapter()
+BHS_ADAPTER = BhsAdapter()
 POROVNEJ_FONDY_ADAPTER = PorovnejFondyAdapter()
 
 ADAPTERS: tuple[DomainAdapter, ...] = (
+    BHS_ADAPTER,
+    AMISTA_ADAPTER,
     AVANT_ADAPTER,
     POROVNEJ_FONDY_ADAPTER,
 )
@@ -30,6 +30,12 @@ def get_domain_adapter(
             return adapter
 
     return None
+
+
+def get_amista_fallback_adapter() -> DomainAdapter:
+    """Return AMISTA as a cross-domain fund-profile provider."""
+
+    return AMISTA_ADAPTER
 
 
 def get_avant_fallback_adapter() -> DomainAdapter:

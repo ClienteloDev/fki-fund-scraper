@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from contextlib import suppress
@@ -28,6 +29,7 @@ from fundscraper.domain_adapters.base import (
     DomainAdapterResult,
 )
 from fundscraper.domain_adapters.registry import (
+    get_amista_fallback_adapter,
     get_avant_fallback_adapter,
     get_domain_adapter,
     get_porovnejfondy_fallback_adapter,
@@ -124,6 +126,7 @@ async def _discover_adapter_sources(
     fetcher: HttpFetcher,
     force: bool,
     avant_fallback: bool,
+    amista_fallback: bool,
     porovnejfondy_fallback: bool,
 ) -> tuple[DomainAdapterResult, str | None]:
     """Discover and merge explicit and fallback adapter sources."""
@@ -137,6 +140,10 @@ async def _discover_adapter_sources(
 
     if avant_fallback:
         adapter = get_avant_fallback_adapter()
+        adapters_by_name.setdefault(adapter.name, adapter)
+
+    if amista_fallback:
+        adapter = get_amista_fallback_adapter()
         adapters_by_name.setdefault(adapter.name, adapter)
 
     if porovnejfondy_fallback:
@@ -247,9 +254,12 @@ async def run_fund_pipeline(
     max_pages: int = 25,
     max_depth: int = 2,
     max_documents: int = 20,
+    document_concurrency: int = 4,
     force: bool = False,
     avant_fallback: bool = False,
+    amista_fallback: bool = False,
     porovnejfondy_fallback: bool = False,
+    output_lock: asyncio.Lock | None = None,
 ) -> FundPipelineResult:
     """Run adapter discovery, crawl, parsing and extraction for one fund."""
 
@@ -294,6 +304,7 @@ async def run_fund_pipeline(
             fetcher=fetcher,
             force=force,
             avant_fallback=avant_fallback,
+            amista_fallback=amista_fallback,
             porovnejfondy_fallback=porovnejfondy_fallback,
         )
 
@@ -309,6 +320,7 @@ async def run_fund_pipeline(
             max_pages=max_pages,
             max_depth=max_depth,
             max_documents=max_documents,
+            document_concurrency=document_concurrency,
             navigation_seed_urls=(adapter_result.navigation_urls),
             document_seed_links=(adapter_result.documents),
             force=force,
@@ -336,11 +348,21 @@ async def run_fund_pipeline(
             for failure in parsing_result.failures
         )
 
-        extraction_result = extract_fund_data(
-            database_path=database_path,
-            output_path=output_path,
-            fund=fund,
-        )
+        if output_lock is None:
+            extraction_result = await asyncio.to_thread(
+                extract_fund_data,
+                database_path=database_path,
+                output_path=output_path,
+                fund=fund,
+            )
+        else:
+            async with output_lock:
+                extraction_result = await asyncio.to_thread(
+                    extract_fund_data,
+                    database_path=database_path,
+                    output_path=output_path,
+                    fund=fund,
+                )
 
         extraction_summary = extraction_result
 
@@ -413,12 +435,21 @@ async def run_fund_pipeline(
                 error_message=failure_message,
             )
 
-        with suppress(OutputFileError):
-            _mark_output_failed(
-                output_path=output_path,
-                fund_id=fund_id,
-                failure_message=failure_message,
-            )
+        if output_lock is None:
+            with suppress(OutputFileError):
+                _mark_output_failed(
+                    output_path=output_path,
+                    fund_id=fund_id,
+                    failure_message=failure_message,
+                )
+        else:
+            async with output_lock:
+                with suppress(OutputFileError):
+                    _mark_output_failed(
+                        output_path=output_path,
+                        fund_id=fund_id,
+                        failure_message=failure_message,
+                    )
 
         return FundPipelineResult(
             fund_id=fund_id,
@@ -471,51 +502,78 @@ async def run_fund_batch(
     max_pages: int = 25,
     max_depth: int = 2,
     max_documents: int = 20,
+    document_concurrency: int = 4,
+    concurrency: int = 6,
     force: bool = False,
     avant_fallback: bool = False,
+    amista_fallback: bool = False,
     porovnejfondy_fallback: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> BatchPipelineSummary:
-    """Run the complete pipeline sequentially for multiple funds."""
+    """Run multiple funds concurrently with serialized output writes."""
+
+    if concurrency < 1:
+        raise ValueError("concurrency must be at least one")
 
     started_at = datetime.now(UTC)
-
-    results: list[FundPipelineResult] = []
-
     total = len(funds)
+    fund_semaphore = asyncio.Semaphore(concurrency)
+    output_lock = asyncio.Lock()
+    progress_lock = asyncio.Lock()
+    completed_count = 0
 
-    for index, fund in enumerate(
-        funds,
-        start=1,
-    ):
-        result = await run_fund_pipeline(
-            database_path=database_path,
-            output_path=output_path,
-            parsed_directory=parsed_directory,
-            fund=fund,
-            fetcher=fetcher,
-            max_pages=max_pages,
-            max_depth=max_depth,
-            max_documents=max_documents,
-            force=force,
-            avant_fallback=avant_fallback,
-            porovnejfondy_fallback=porovnejfondy_fallback,
-        )
+    indexed_results: list[FundPipelineResult | None] = [None] * total
 
-        results.append(result)
+    async def run_one(
+        index: int,
+        fund: FundInput,
+    ) -> None:
+        nonlocal completed_count
 
-        if progress_callback is not None:
-            progress_callback(
-                index,
-                total,
-                result,
+        async with fund_semaphore:
+            result = await run_fund_pipeline(
+                database_path=database_path,
+                output_path=output_path,
+                parsed_directory=parsed_directory,
+                fund=fund,
+                fetcher=fetcher,
+                max_pages=max_pages,
+                max_depth=max_depth,
+                max_documents=max_documents,
+                document_concurrency=document_concurrency,
+                force=force,
+                avant_fallback=avant_fallback,
+                amista_fallback=amista_fallback,
+                porovnejfondy_fallback=porovnejfondy_fallback,
+                output_lock=output_lock,
             )
+
+        indexed_results[index] = result
+
+        async with progress_lock:
+            completed_count += 1
+
+            if progress_callback is not None:
+                progress_callback(
+                    completed_count,
+                    total,
+                    result,
+                )
+
+    await asyncio.gather(*(run_one(index, fund) for index, fund in enumerate(funds)))
+
+    results = tuple(result for result in indexed_results if result is not None)
+
+    if len(results) != total:
+        raise RuntimeError(
+            f"Concurrent fund batch did not produce all results: {len(results)} != {total}"
+        )
 
     return BatchPipelineSummary(
         started_at=started_at,
         finished_at=datetime.now(UTC),
         output_path=output_path,
-        results=tuple(results),
+        results=results,
     )
 
 

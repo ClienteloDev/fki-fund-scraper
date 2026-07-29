@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -68,6 +69,7 @@ async def crawl_fund_site(
     max_pages: int = 25,
     max_depth: int = 2,
     max_documents: int = 20,
+    document_concurrency: int = 4,
     navigation_seed_urls: tuple[str, ...] = (),
     document_seed_links: tuple[DiscoveredLink, ...] = (),
     force: bool = False,
@@ -82,6 +84,9 @@ async def crawl_fund_site(
 
     if max_documents < 0:
         raise CrawlError("max_documents must not be negative")
+
+    if document_concurrency < 1:
+        raise CrawlError("document_concurrency must be at least one")
 
     fund_id = stable_fund_id(fund)
 
@@ -303,78 +308,88 @@ async def crawl_fund_site(
         )
     )
 
-    documents_downloaded = 0
+    download_semaphore = asyncio.Semaphore(document_concurrency)
 
-    for document in ordered_documents[:max_documents]:
-        record_attempt(
-            database_path,
-            fund_id=fund_id,
-            stage="download_document",
-            status=AttemptStatus.STARTED,
-            url=document.url,
-        )
-
-        try:
-            result = await fetcher.fetch(
-                document.url,
-                force=force,
+    async def download_document(
+        document: DiscoveredLink,
+    ) -> tuple[bool, CrawlFailure | None]:
+        async with download_semaphore:
+            record_attempt(
+                database_path,
+                fund_id=fund_id,
+                stage="download_document",
+                status=AttemptStatus.STARTED,
+                url=document.url,
             )
-        except FetchError as exc:
-            failures.append(
-                CrawlFailure(
-                    url=document.url,
-                    stage="download_document",
-                    error_code=exc.code,
-                    message=str(exc),
+
+            try:
+                result = await fetcher.fetch(
+                    document.url,
+                    force=force,
                 )
-            )
+            except FetchError as exc:
+                upsert_source(
+                    database_path,
+                    fund_id=fund_id,
+                    url=document.url,
+                    status=SourceStatus.FAILED,
+                    document_type=(document.document_type.value),
+                    title=(document.text or None),
+                    error_code=exc.code,
+                    error_message=str(exc),
+                )
+
+                record_attempt(
+                    database_path,
+                    fund_id=fund_id,
+                    stage="download_document",
+                    status=AttemptStatus.FAILED,
+                    url=document.url,
+                    error_code=exc.code,
+                    error_message=str(exc),
+                )
+
+                return (
+                    False,
+                    CrawlFailure(
+                        url=document.url,
+                        stage="download_document",
+                        error_code=exc.code,
+                        message=str(exc),
+                    ),
+                )
 
             upsert_source(
                 database_path,
                 fund_id=fund_id,
-                url=document.url,
-                status=SourceStatus.FAILED,
+                url=result.final_url,
+                status=SourceStatus.DOWNLOADED,
                 document_type=(document.document_type.value),
+                content_type=result.content_type,
                 title=(document.text or None),
-                error_code=exc.code,
-                error_message=str(exc),
+                retrieved_at=result.retrieved_at,
+                http_status=result.status_code,
+                sha256=result.sha256,
+                local_path=str(result.local_path),
             )
 
             record_attempt(
                 database_path,
                 fund_id=fund_id,
                 stage="download_document",
-                status=AttemptStatus.FAILED,
-                url=document.url,
-                error_code=exc.code,
-                error_message=str(exc),
+                status=AttemptStatus.SUCCEEDED,
+                url=result.final_url,
             )
 
-            continue
+            return (True, None)
 
-        documents_downloaded += 1
+    download_results = await asyncio.gather(
+        *(download_document(document) for document in ordered_documents[:max_documents])
+    )
 
-        upsert_source(
-            database_path,
-            fund_id=fund_id,
-            url=result.final_url,
-            status=SourceStatus.DOWNLOADED,
-            document_type=(document.document_type.value),
-            content_type=result.content_type,
-            title=(document.text or None),
-            retrieved_at=result.retrieved_at,
-            http_status=result.status_code,
-            sha256=result.sha256,
-            local_path=str(result.local_path),
-        )
+    documents_downloaded = sum(1 for succeeded, _ in download_results if succeeded)
 
-        record_attempt(
-            database_path,
-            fund_id=fund_id,
-            stage="download_document",
-            status=AttemptStatus.SUCCEEDED,
-            url=result.final_url,
-        )
+    failures.extend(failure for _, failure in download_results if failure is not None)
 
     return CrawlSummary(
         fund_id=fund_id,

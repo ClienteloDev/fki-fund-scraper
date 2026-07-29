@@ -17,8 +17,9 @@ class HttpSettings:
 
     timeout_seconds: float = 30.0
     max_retries: int = 3
-    max_concurrency: int = 5
-    requests_per_second: float = 2.0
+    max_concurrency: int = 8
+    max_per_domain_concurrency: int = 2
+    requests_per_second: float = 4.0
     max_response_bytes: int = 50_000_000
     retry_min_wait_seconds: float = 0.5
     retry_max_wait_seconds: float = 5.0
@@ -33,6 +34,9 @@ class HttpSettings:
 
         if self.max_concurrency < 1:
             raise ConfigurationError("HTTP concurrency must be at least one")
+
+        if self.max_per_domain_concurrency < 1:
+            raise ConfigurationError("Per-domain HTTP concurrency must be at least one")
 
         if self.requests_per_second <= 0:
             raise ConfigurationError("HTTP rate limit must be greater than zero")
@@ -68,11 +72,15 @@ class HttpSettings:
             ),
             max_concurrency=_read_int(
                 "HTTP_CONCURRENCY",
-                5,
+                8,
+            ),
+            max_per_domain_concurrency=_read_int(
+                "HTTP_PER_DOMAIN_CONCURRENCY",
+                2,
             ),
             requests_per_second=_read_float(
                 "HTTP_REQUESTS_PER_SECOND",
-                2.0,
+                4.0,
             ),
             max_response_bytes=_read_int(
                 "HTTP_MAX_RESPONSE_BYTES",

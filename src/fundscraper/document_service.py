@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
 from fundscraper.database import (
     AttemptStatus,
     DatabaseError,
+    SourceRecord,
     list_parseable_sources,
     record_attempt,
     record_parsed_document,
 )
 from fundscraper.document_parser import (
     DocumentParseError,
+    ParsedDocument,
     load_parsed_document,
     parse_document,
     write_parsed_document,
@@ -37,6 +40,43 @@ class DocumentParsingSummary:
     scanned_candidates: int
     total_characters: int
     failures: tuple[DocumentParsingFailure, ...]
+
+
+def _parse_source_document(
+    *,
+    source: SourceRecord,
+    parsed_directory: Path,
+    fund_id: str,
+) -> tuple[ParsedDocument, Path]:
+    """Read, parse and validate one source outside the event-loop thread."""
+
+    if source.local_path is None:
+        raise DocumentParseError("Downloaded source does not contain a local file path")
+
+    source_path = Path(source.local_path)
+
+    if not source_path.exists():
+        raise DocumentParseError(f"Downloaded source file does not exist: {source_path}")
+
+    body = source_path.read_bytes()
+
+    document = parse_document(
+        body=body,
+        content_type=source.content_type,
+        url=source.url,
+    )
+
+    parsed_path = write_parsed_document(
+        directory=parsed_directory,
+        fund_id=fund_id,
+        source_id=source.source_id,
+        document=document,
+    )
+
+    return (
+        load_parsed_document(parsed_path),
+        parsed_path,
+    )
 
 
 async def parse_fund_documents(
@@ -75,27 +115,12 @@ async def parse_fund_documents(
             if source.local_path is None:
                 raise DocumentParseError("Downloaded source does not contain a local file path")
 
-            source_path = Path(source.local_path)
-
-            if not source_path.exists():
-                raise DocumentParseError(f"Downloaded source file does not exist: {source_path}")
-
-            body = source_path.read_bytes()
-
-            document = parse_document(
-                body=body,
-                content_type=source.content_type,
-                url=source.url,
-            )
-
-            parsed_path = write_parsed_document(
-                directory=parsed_directory,
+            validated_document, parsed_path = await asyncio.to_thread(
+                _parse_source_document,
+                source=source,
+                parsed_directory=parsed_directory,
                 fund_id=fund_id,
-                source_id=source.source_id,
-                document=document,
             )
-
-            validated_document = load_parsed_document(parsed_path)
 
             record_parsed_document(
                 database_path,

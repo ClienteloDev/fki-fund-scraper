@@ -364,9 +364,14 @@ def test_run_retry_help() -> None:
             "run-retry",
             "--help",
         ],
+        terminal_width=240,
     )
 
     assert result.exit_code == 0
     assert "--master-input" in result.stdout
     assert "--retry-output" in result.stdout
     assert "--avant-fallback" in result.stdout
+    assert "--amista-fallback" in result.stdout
+    assert "--porovnejfondy-fallback" in result.stdout
+    assert "--concurrency" in result.stdout
+    assert "--document-concurrency" in result.stdout
