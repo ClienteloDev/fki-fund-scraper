@@ -24,17 +24,22 @@ from fundscraper.document_service import (
     parse_fund_documents,
 )
 from fundscraper.domain_adapters.base import (
+    DomainAdapter,
     DomainAdapterResult,
 )
 from fundscraper.domain_adapters.registry import (
+    get_avant_fallback_adapter,
     get_domain_adapter,
+    get_porovnejfondy_fallback_adapter,
 )
 from fundscraper.extraction_service import (
     ExtractionSummary,
     extract_fund_data,
 )
+from fundscraper.html_discovery import DiscoveredLink
 from fundscraper.http_client import HttpFetcher
 from fundscraper.models import FundInput
+from fundscraper.normalization import canonical_url
 from fundscraper.output_models import (
     ProcessingMetadata,
     ProcessingStatus,
@@ -113,6 +118,82 @@ ProgressCallback = Callable[
 ]
 
 
+async def _discover_adapter_sources(
+    *,
+    fund: FundInput,
+    fetcher: HttpFetcher,
+    force: bool,
+    avant_fallback: bool,
+    porovnejfondy_fallback: bool,
+) -> tuple[DomainAdapterResult, str | None]:
+    """Discover and merge explicit and fallback adapter sources."""
+
+    adapters_by_name: dict[str, DomainAdapter] = {}
+
+    explicit_adapter = get_domain_adapter(fund)
+
+    if explicit_adapter is not None:
+        adapters_by_name[explicit_adapter.name] = explicit_adapter
+
+    if avant_fallback:
+        adapter = get_avant_fallback_adapter()
+        adapters_by_name.setdefault(adapter.name, adapter)
+
+    if porovnejfondy_fallback:
+        adapter = get_porovnejfondy_fallback_adapter()
+        adapters_by_name.setdefault(adapter.name, adapter)
+
+    navigation_by_url: dict[str, str] = {}
+    documents_by_url: dict[str, DiscoveredLink] = {}
+    warnings: list[str] = []
+    active_adapter_names: list[str] = []
+
+    for adapter in adapters_by_name.values():
+        result = await adapter.discover(
+            fund=fund,
+            fetcher=fetcher,
+            force=force,
+        )
+
+        warnings.extend(result.warnings)
+
+        # Record adapters that were successfully attempted, even when
+        # they did not find a matching page or document. This makes retry
+        # diagnostics distinguish "fallback not used" from "fallback used
+        # but no exact source was found".
+        active_adapter_names.append(result.adapter_name)
+
+        for navigation_url in result.navigation_urls:
+            navigation_by_url[canonical_url(navigation_url)] = navigation_url
+
+        for document in result.documents:
+            key = canonical_url(document.url)
+            existing = documents_by_url.get(key)
+
+            if existing is None or document.score > existing.score:
+                documents_by_url[key] = document
+
+    adapter_name = "+".join(active_adapter_names) if active_adapter_names else None
+
+    return (
+        DomainAdapterResult(
+            adapter_name=adapter_name or "none",
+            navigation_urls=tuple(sorted(navigation_by_url.values())),
+            documents=tuple(
+                sorted(
+                    documents_by_url.values(),
+                    key=lambda item: (
+                        -item.score,
+                        item.url,
+                    ),
+                )
+            ),
+            warnings=tuple(warnings),
+        ),
+        adapter_name,
+    )
+
+
 def synchronize_output_file(
     *,
     funds: list[FundInput],
@@ -167,6 +248,8 @@ async def run_fund_pipeline(
     max_depth: int = 2,
     max_documents: int = 20,
     force: bool = False,
+    avant_fallback: bool = False,
+    porovnejfondy_fallback: bool = False,
 ) -> FundPipelineResult:
     """Run adapter discovery, crawl, parsing and extraction for one fund."""
 
@@ -191,8 +274,6 @@ async def run_fund_pipeline(
         warnings=(),
     )
 
-    adapter = get_domain_adapter(fund)
-
     update_fund_status(
         database_path,
         fund_id=fund_id,
@@ -208,16 +289,15 @@ async def run_fund_pipeline(
     )
 
     try:
-        if adapter is not None:
-            adapter_result = await adapter.discover(
-                fund=fund,
-                fetcher=fetcher,
-                force=force,
-            )
+        adapter_result, adapter_name = await _discover_adapter_sources(
+            fund=fund,
+            fetcher=fetcher,
+            force=force,
+            avant_fallback=avant_fallback,
+            porovnejfondy_fallback=porovnejfondy_fallback,
+        )
 
-            adapter_name = adapter_result.adapter_name
-
-            failures.extend(adapter_result.warnings)
+        failures.extend(adapter_result.warnings)
 
         # This call must remain outside the adapter condition.
         # Funds without a domain adapter still need to run
@@ -392,6 +472,8 @@ async def run_fund_batch(
     max_depth: int = 2,
     max_documents: int = 20,
     force: bool = False,
+    avant_fallback: bool = False,
+    porovnejfondy_fallback: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> BatchPipelineSummary:
     """Run the complete pipeline sequentially for multiple funds."""
@@ -416,6 +498,8 @@ async def run_fund_batch(
             max_depth=max_depth,
             max_documents=max_documents,
             force=force,
+            avant_fallback=avant_fallback,
+            porovnejfondy_fallback=porovnejfondy_fallback,
         )
 
         results.append(result)

@@ -30,10 +30,30 @@ from fundscraper.output_models import (
 
 AVANT_DOMAIN = "avantfunds.cz"
 
+
+AVANT_MANAGED_EXTERNAL_FUND_KEYS = frozenset(
+    {
+        "nemomax",
+        "spilberk",
+    }
+)
+
+
 AVANT_CATALOG_URLS = (
     "https://www.avantfunds.cz/informace-o-fondech/",
     "https://www.avantfunds.cz/informacni-povinnost/",
 )
+
+
+AVANT_DIRECT_FUND_URLS = {
+    "spilberk": ("https://www.avantfunds.cz/fondy/spilberk-investicni-fond-sicav-a-s/"),
+    "nemomax": (
+        "https://www.avantfunds.cz/"
+        "fondy/"
+        "nemomax-investicni-fond-"
+        "s-promennym-zakladnim-kapitalem-a-s-2/"
+    ),
+}
 
 
 GENERIC_ENTITY_TOKENS = frozenset(
@@ -50,8 +70,14 @@ GENERIC_ENTITY_TOKENS = frozenset(
         "spolecnost",
         "uzavreny",
         "otevreny",
+        "kapital",
         "kapitalem",
+        "zakladni",
+        "zakladnim",
+        "zakladniho",
+        "promenny",
         "promennym",
+        "promenneho",
     }
 )
 
@@ -94,7 +120,16 @@ IRRELEVANT_DOCUMENT_KEYWORDS = (
 
 
 class AvantFundsAdapter:
-    """Discover exact fund documents in AVANT catalog pages."""
+    """
+    Discover documents belonging to one exact fund on AVANT pages.
+
+    The direct fund page can contain investment information but usually
+    does not contain downloadable documents. The central AVANT catalogs
+    are therefore processed as the authoritative document source.
+
+    For externally hosted funds, AVANT navigation links are not returned
+    to the generic crawler. Only relevant discovered documents are added.
+    """
 
     name = "avantfunds"
 
@@ -102,7 +137,14 @@ class AvantFundsAdapter:
         self,
         fund: FundInput,
     ) -> bool:
-        return canonical_domain(fund.web) == AVANT_DOMAIN
+        domain = canonical_domain(fund.web)
+
+        if domain == AVANT_DOMAIN:
+            return True
+
+        fund_key = _entity_key(fund.name)
+
+        return fund_key in AVANT_MANAGED_EXTERNAL_FUND_KEYS
 
     async def discover(
         self,
@@ -123,15 +165,69 @@ class AvantFundsAdapter:
 
         warnings: list[str] = []
 
+        fund_key = _entity_key(fund.name)
+
+        direct_fund_url = AVANT_DIRECT_FUND_URLS.get(fund_key)
+
+        source_pages: list[
+            tuple[
+                str,
+                bool,
+            ]
+        ] = []
+
+        if direct_fund_url is not None:
+            source_pages.append(
+                (
+                    direct_fund_url,
+                    True,
+                )
+            )
+
         for catalog_url in AVANT_CATALOG_URLS:
+            source_pages.append(
+                (
+                    catalog_url,
+                    False,
+                )
+            )
+
+        unique_source_pages: list[
+            tuple[
+                str,
+                bool,
+            ]
+        ] = []
+
+        seen_source_urls: set[str] = set()
+
+        for source_url, allow_root_fallback in source_pages:
+            source_key = canonical_url(source_url)
+
+            if source_key in seen_source_urls:
+                continue
+
+            seen_source_urls.add(source_key)
+
+            unique_source_pages.append(
+                (
+                    source_url,
+                    allow_root_fallback,
+                )
+            )
+
+        for (
+            source_url,
+            allow_root_fallback,
+        ) in unique_source_pages:
             try:
                 result = await fetcher.fetch(
-                    catalog_url,
+                    source_url,
                     force=force,
                 )
             except FetchError as exc:
                 warnings.append(
-                    f"AVANT catalog could not be downloaded: {catalog_url}: {exc.code}: {exc}"
+                    f"AVANT page could not be downloaded: {source_url}: {exc.code}: {exc}"
                 )
 
                 continue
@@ -142,8 +238,8 @@ class AvantFundsAdapter:
                 None,
             }:
                 warnings.append(
-                    "AVANT catalog returned an unexpected "
-                    f"content type: {catalog_url}: "
+                    "AVANT page returned an unexpected "
+                    f"content type: {source_url}: "
                     f"{result.content_type}"
                 )
 
@@ -153,19 +249,28 @@ class AvantFundsAdapter:
                 body=result.body,
                 page_url=result.final_url,
                 fund_name=fund.name,
+                allow_root_fallback=(allow_root_fallback),
             )
 
             if page_discovery is None:
-                warnings.append(
-                    f"The exact fund section was not found in AVANT catalog: {result.final_url}"
-                )
+                if not allow_root_fallback:
+                    warnings.append(
+                        "The exact fund document section "
+                        "was not found on AVANT page: "
+                        f"{result.final_url}"
+                    )
 
                 continue
 
-            navigation_urls, documents = page_discovery
+            (
+                navigation_urls,
+                documents,
+            ) = page_discovery
 
             for navigation_url in navigation_urls:
-                navigation_by_url[canonical_url(navigation_url)] = navigation_url
+                key = canonical_url(navigation_url)
+
+                navigation_by_url[key] = navigation_url
 
             for document in documents:
                 key = canonical_url(document.url)
@@ -175,9 +280,16 @@ class AvantFundsAdapter:
                 if existing is None or document.score > existing.score:
                     documents_by_url[key] = document
 
+        navigation_urls_result = tuple(sorted(navigation_by_url.values()))
+
+        if canonical_domain(fund.web) != AVANT_DOMAIN:
+            # The official external website is handled by the generic
+            # crawler. AVANT provides documents only.
+            navigation_urls_result = ()
+
         return DomainAdapterResult(
             adapter_name=self.name,
-            navigation_urls=tuple(sorted(navigation_by_url.values())),
+            navigation_urls=(navigation_urls_result),
             documents=tuple(
                 sorted(
                     documents_by_url.values(),
@@ -196,6 +308,7 @@ def parse_avant_catalog_page(
     body: bytes,
     page_url: str,
     fund_name: str,
+    allow_root_fallback: bool = False,
 ) -> (
     tuple[
         tuple[str, ...],
@@ -203,7 +316,13 @@ def parse_avant_catalog_page(
     ]
     | None
 ):
-    """Extract links belonging to one exact fund catalog section."""
+    """
+    Extract links belonging to one exact fund section.
+
+    Root fallback is allowed only for a direct fund profile page.
+    It is never allowed for the large central catalogs because that
+    would collect documents belonging to all AVANT funds.
+    """
 
     if not body:
         return None
@@ -213,7 +332,24 @@ def parse_avant_catalog_page(
     container = _find_fund_container(
         parser=parser,
         fund_name=fund_name,
+        page_url=page_url,
     )
+
+    if container is None and allow_root_fallback:
+        root_node = parser.root
+
+        if root_node is None:
+            return None
+
+        page_text = _node_text(root_node)
+
+        if not _matches_fund_name(
+            value=page_text,
+            target_key=_entity_key(fund_name),
+        ):
+            return None
+
+        container = root_node
 
     if container is None:
         return None
@@ -259,7 +395,7 @@ def parse_avant_catalog_page(
                     url=resolved_url,
                     text=link_text,
                     score=40,
-                    document_type=DocumentType.OTHER,
+                    document_type=(DocumentType.OTHER),
                     same_domain=(canonical_domain(resolved_url) == canonical_domain(page_url)),
                     direct_document=True,
                 )
@@ -270,7 +406,7 @@ def parse_avant_catalog_page(
             boosted_candidate = DiscoveredLink(
                 url=candidate.url,
                 text=candidate.text,
-                score=candidate.score + 40,
+                score=(candidate.score + 40),
                 document_type=(candidate.document_type),
                 same_domain=(candidate.same_domain),
                 direct_document=True,
@@ -315,51 +451,99 @@ def _find_fund_container(
     *,
     parser: LexborHTMLParser,
     fund_name: str,
+    page_url: str,
 ) -> Any | None:
     """
-    Find the nearest bounded HTML container belonging to the fund.
+    Find the smallest fund-specific container that contains documents.
 
-    The nearest section-like ancestor is preferred over a larger parent
-    containing documents of multiple funds.
+    The catalog often stores the fund title in a nested element while
+    attachments are placed in a higher parent. Therefore the search walks
+    upwards until it reaches an ancestor containing a direct document URL.
     """
 
     target_key = _entity_key(fund_name)
 
-    headings = parser.css("h1, h2, h3, h4, h5, h6, button, strong, summary, p")
+    matching_nodes: list[Any] = []
 
-    for heading in headings:
-        heading_text = _node_text(heading)
+    for node in parser.css("h1, h2, h3, h4, h5, h6, button, strong, summary, p, a"):
+        node_text = _node_text(node)
 
         if not _matches_fund_name(
-            value=heading_text,
+            value=node_text,
             target_key=target_key,
         ):
             continue
 
-        current: Any | None = heading
+        matching_nodes.append(node)
 
-        for _ in range(8):
+    container_candidates: list[
+        tuple[
+            int,
+            int,
+            Any,
+        ]
+    ] = []
+
+    for matching_node in matching_nodes:
+        current: Any | None = matching_node
+
+        for depth in range(12):
             if current is None:
                 break
 
             tag_name = str(current.tag).casefold()
 
-            links = current.css("a[href]")
-
-            if links and tag_name in {
+            if tag_name in {
                 "section",
                 "article",
                 "li",
                 "details",
                 "div",
+                "main",
             }:
-                return current
+                document_count = _count_document_links(
+                    node=current,
+                    page_url=page_url,
+                )
+
+                if document_count > 0:
+                    container_text = _node_text(current)
+
+                    container_candidates.append(
+                        (
+                            len(container_text),
+                            depth,
+                            current,
+                        )
+                    )
+
+                    # This is the closest ancestor for this matching
+                    # heading that already contains document links.
+                    break
 
             current = current.parent
 
-    fallback_candidates: list[tuple[int, Any]] = []
+    if container_candidates:
+        _, _, best_node = min(
+            container_candidates,
+            key=lambda item: (
+                item[0],
+                item[1],
+            ),
+        )
 
-    for node in parser.css("section, article, li, details, div"):
+        return best_node
+
+    # Fallback for catalog structures where the fund name is not stored
+    # inside a heading-like element.
+    fallback_candidates: list[
+        tuple[
+            int,
+            Any,
+        ]
+    ] = []
+
+    for node in parser.css("section, article, li, details, div, main"):
         text = _node_text(node)
 
         if not _matches_fund_name(
@@ -368,13 +552,15 @@ def _find_fund_container(
         ):
             continue
 
-        links = node.css("a[href]")
-
-        if not links:
+        if (
+            _count_document_links(
+                node=node,
+                page_url=page_url,
+            )
+            == 0
+        ):
             continue
 
-        # Prefer the smallest matching container. A large parent often
-        # contains sections belonging to several different funds.
         fallback_candidates.append(
             (
                 len(text),
@@ -391,6 +577,41 @@ def _find_fund_container(
     )
 
     return best_node
+
+
+def _count_document_links(
+    *,
+    node: Any,
+    page_url: str,
+) -> int:
+    count = 0
+
+    for link_node in node.css("a[href]"):
+        if _node_has_document_href(
+            node=link_node,
+            page_url=page_url,
+        ):
+            count += 1
+
+    return count
+
+
+def _node_has_document_href(
+    *,
+    node: Any,
+    page_url: str,
+) -> bool:
+    raw_href = node.attributes.get("href")
+
+    if not raw_href:
+        return False
+
+    resolved_url = resolve_link_url(
+        base_url=page_url,
+        raw_href=raw_href,
+    )
+
+    return resolved_url is not None and is_direct_document_url(resolved_url)
 
 
 def _matches_fund_name(
@@ -474,25 +695,7 @@ def _is_fund_navigation_link(
 
     normalized_url = normalize_search_text(url)
 
-    return "/fondy/" in url and any(token in normalized_url for token in fund_tokens)
-
-
-def _node_has_document_href(
-    *,
-    node: Any,
-    page_url: str,
-) -> bool:
-    raw_href = node.attributes.get("href")
-
-    if not raw_href:
-        return False
-
-    resolved_url = resolve_link_url(
-        base_url=page_url,
-        raw_href=raw_href,
-    )
-
-    return resolved_url is not None and is_direct_document_url(resolved_url)
+    return "/fondy/" in url.casefold() and any(token in normalized_url for token in fund_tokens)
 
 
 def _node_text(

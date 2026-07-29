@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Annotated
@@ -86,8 +87,11 @@ from fundscraper.input_loader import InputFileError, load_funds
 from fundscraper.normalization import canonical_domain, canonical_url
 from fundscraper.output_service import (
     OutputFileError,
+    RetryMergeSummary,
     create_pending_output,
     load_output,
+    merge_improved_outputs,
+    stable_fund_id,
     write_output,
     write_output_schema,
 )
@@ -1360,6 +1364,331 @@ def run_sample_command(
 
     typer.echo(f"Output file: {summary.output_path}")
 
+    typer.echo(f"Report file: {report_path}")
+
+
+@app.command("run-retry")
+def run_retry_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Retry subset JSON file.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.retry.json"),
+    master_input_path: Annotated[
+        Path,
+        typer.Option(
+            "--master-input",
+            help="Complete original funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Master enriched output JSON file.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.enriched.json"),
+    retry_output_path: Annotated[
+        Path,
+        typer.Option(
+            "--retry-output",
+            help="Temporary isolated retry output JSON file.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.retry.enriched.json"),
+    report_path: Annotated[
+        Path,
+        typer.Option(
+            "--report",
+            help="JSON report for the retry run.",
+            dir_okay=False,
+        ),
+    ] = Path("reports/retry-run.json"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="HTTP cache directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    parsed_directory: Annotated[
+        Path,
+        typer.Option(
+            "--parsed-directory",
+            help="Parsed document directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/parsed"),
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            min=0,
+            max=230,
+            help="Number of retry funds to process; 0 means all.",
+        ),
+    ] = 0,
+    offset: Annotated[
+        int,
+        typer.Option(
+            "--offset",
+            min=0,
+            help="Number of retry-input funds to skip.",
+        ),
+    ] = 0,
+    max_pages: Annotated[
+        int,
+        typer.Option(
+            "--max-pages",
+            min=1,
+            max=100,
+        ),
+    ] = 30,
+    max_depth: Annotated[
+        int,
+        typer.Option(
+            "--max-depth",
+            min=0,
+            max=5,
+        ),
+    ] = 3,
+    max_documents: Annotated[
+        int,
+        typer.Option(
+            "--max-documents",
+            min=0,
+            max=100,
+        ),
+    ] = 30,
+    minimum_found_improvement: Annotated[
+        int,
+        typer.Option(
+            "--minimum-found-improvement",
+            min=0,
+            max=5,
+            help=(
+                "Minimum increase in found fields required before "
+                "a retry result replaces the master result."
+            ),
+        ),
+    ] = 1,
+    avant_fallback: Annotated[
+        bool,
+        typer.Option(
+            "--avant-fallback/--no-avant-fallback",
+            help=("Use the AVANT catalog as an additional document source."),
+        ),
+    ] = True,
+    porovnejfondy_fallback: Annotated[
+        bool,
+        typer.Option(
+            "--porovnejfondy-fallback/--no-porovnejfondy-fallback",
+            help=(
+                "Use PorovnejFondy.cz as a final fund-page fallback "
+                "after the official website and AVANT."
+            ),
+        ),
+    ] = True,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore cached and parsed data.",
+        ),
+    ] = False,
+) -> None:
+    """Retry only weak funds and merge only improved results."""
+
+    summary: BatchPipelineSummary
+    merge_summary: RetryMergeSummary
+
+    try:
+        master_funds = load_funds(master_input_path)
+
+        all_retry_funds = load_funds(input_path)
+
+        if offset >= len(all_retry_funds):
+            raise OutputFileError(
+                f"Retry offset is outside the retry input: {offset} >= {len(all_retry_funds)}"
+            )
+
+        if limit == 0:
+            requested_retry_funds = all_retry_funds[offset:]
+        else:
+            requested_retry_funds = all_retry_funds[offset : offset + limit]
+
+        master_by_id = {stable_fund_id(fund): fund for fund in master_funds}
+
+        requested_retry_ids = [stable_fund_id(fund) for fund in requested_retry_funds]
+
+        retry_fund_ids = set(requested_retry_ids)
+
+        if len(retry_fund_ids) != len(requested_retry_ids):
+            raise OutputFileError("Retry input contains duplicate funds.")
+
+        missing_ids = sorted(retry_fund_ids - set(master_by_id))
+
+        if missing_ids:
+            raise OutputFileError(
+                "Retry input contains funds that are not present "
+                "in the master input: " + ", ".join(missing_ids)
+            )
+
+        retry_funds = [master_by_id[fund_id] for fund_id in requested_retry_ids]
+
+        if output_path.resolve() == retry_output_path.resolve():
+            raise OutputFileError("Master output and retry output must be different files.")
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            master_funds,
+        )
+
+        synchronize_output_file(
+            funds=master_funds,
+            output_path=output_path,
+        )
+
+        synchronize_output_file(
+            funds=retry_funds,
+            output_path=retry_output_path,
+            reset=True,
+        )
+
+        settings = HttpSettings.from_environment()
+
+        def show_progress(
+            index: int,
+            total: int,
+            result: FundPipelineResult,
+        ) -> None:
+            typer.echo(
+                f"[{index}/{total}] "
+                f"{result.fund_name}: "
+                f"{result.status.value}, "
+                f"{result.fields_found}/5 fields"
+            )
+
+        async def run_batch() -> BatchPipelineSummary:
+            async with HttpFetcher(
+                settings,
+                cache_directory,
+            ) as fetcher:
+                return await run_fund_batch(
+                    database_path=database_path,
+                    output_path=retry_output_path,
+                    parsed_directory=parsed_directory,
+                    funds=retry_funds,
+                    fetcher=fetcher,
+                    max_pages=max_pages,
+                    max_depth=max_depth,
+                    max_documents=max_documents,
+                    force=force,
+                    avant_fallback=avant_fallback,
+                    porovnejfondy_fallback=(porovnejfondy_fallback),
+                    progress_callback=show_progress,
+                )
+
+        summary = asyncio.run(run_batch())
+
+        write_batch_report(
+            summary=summary,
+            report_path=report_path,
+        )
+
+        master_outputs = load_output(output_path)
+
+        retry_outputs = load_output(retry_output_path)
+
+        merged_outputs, merge_summary = merge_improved_outputs(
+            base_outputs=master_outputs,
+            retry_outputs=retry_outputs,
+            retry_fund_ids=retry_fund_ids,
+            minimum_found_improvement=(minimum_found_improvement),
+        )
+
+        write_output(
+            output_path,
+            merged_outputs,
+            overwrite=True,
+        )
+
+        report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+
+        report_payload["merge"] = {
+            "minimum_found_improvement": (minimum_found_improvement),
+            "avant_fallback": avant_fallback,
+            "porovnejfondy_fallback": (porovnejfondy_fallback),
+            "candidates": merge_summary.candidates,
+            "replaced": merge_summary.replaced,
+            "preserved": merge_summary.preserved,
+            "missing_candidates": (merge_summary.missing_candidates),
+            "master_output_path": str(output_path),
+            "retry_output_path": str(retry_output_path),
+        }
+
+        serialized_report = (
+            json.dumps(
+                report_payload,
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n"
+        )
+
+        temporary_report_path = report_path.with_suffix(f"{report_path.suffix}.tmp")
+
+        temporary_report_path.write_text(
+            serialized_report,
+            encoding="utf-8",
+        )
+
+        temporary_report_path.replace(report_path)
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        OutputFileError,
+        json.JSONDecodeError,
+        OSError,
+    ) as exc:
+        typer.echo(
+            f"Retry pipeline failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    typer.echo("")
+    typer.echo(f"Retry funds requested: {summary.requested}")
+    typer.echo(f"Completed 5/5: {summary.completed}")
+    typer.echo(f"Partial: {summary.partial}")
+    typer.echo(f"Failed: {summary.failed}")
+    typer.echo(f"Master records replaced: {merge_summary.replaced}")
+    typer.echo(f"Master records preserved: {merge_summary.preserved}")
+    typer.echo(f"Master output: {output_path}")
+    typer.echo(f"Retry output: {retry_output_path}")
     typer.echo(f"Report file: {report_path}")
 
 

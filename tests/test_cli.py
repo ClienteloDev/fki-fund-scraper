@@ -355,3 +355,18 @@ def test_apply_grounded_decisions_reports_missing_file(
     assert result.exit_code == 1
 
     assert "Grounded decision application failed:" in result.output
+
+
+def test_run_retry_help() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "run-retry",
+            "--help",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "--master-input" in result.stdout
+    assert "--retry-output" in result.stdout
+    assert "--avant-fallback" in result.stdout

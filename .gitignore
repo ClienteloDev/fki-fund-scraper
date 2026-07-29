@@ -51,3 +51,44 @@ Thumbs.db
 
 # Runtime pipeline reports
 reports/*.json
+
+# BEGIN fundscraper runtime artifacts
+
+# Runtime databases and caches
+/cache/
+
+# Backups and local releases
+/backups/
+/releases/
+
+# Generated reports
+/reports/
+
+# Generated enriched outputs
+/data/output/*
+!/data/output/.gitkeep
+
+# Generated retry, sample and partial inputs
+/data/input/funds.retry*.json
+/data/input/*retry*.json
+/data/input/*partial*.json
+/data/input/*sample*.json
+
+# Downloaded patch packages and extracted installers
+/tools/*-patch/
+/tools/*-launcher/
+*.zip
+
+# Temporary and backup files
+*.bak
+*.tmp
+
+# One-off audit and partial-run scripts
+/scripts/build-retry-input.ps1
+/scripts/inspect-partial-run.ps1
+/scripts/audit-sample.ps1
+/scripts/*partial*.ps1
+/scripts/*audit*.ps1
+/scripts/*sample*.ps1
+
+# END fundscraper runtime artifacts

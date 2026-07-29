@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fundscraper.html_discovery import (
     classify_link,
+    is_direct_document_url,
     is_html_response,
     parse_html_page,
     resolve_link_url,
@@ -118,4 +119,123 @@ def test_detects_html_without_content_type() -> None:
     assert is_html_response(
         content_type=None,
         body=b"<!doctype html><html></html>",
+    )
+
+
+def test_rejects_contact_links() -> None:
+    assert (
+        resolve_link_url(
+            base_url="https://example.com/fund",
+            raw_href="mailto:info@example.com",
+        )
+        is None
+    )
+
+    assert (
+        resolve_link_url(
+            base_url="https://example.com/fund",
+            raw_href="tel:+420123456789",
+        )
+        is None
+    )
+
+
+def test_rejects_cloudflare_email_link() -> None:
+    assert (
+        resolve_link_url(
+            base_url="https://example.com/",
+            raw_href="/cdn-cgi/l/email-protection",
+        )
+        is None
+    )
+
+
+def test_rejects_image_assets() -> None:
+    for href in (
+        "/images/project.jpg",
+        "/images/project.png",
+        "/images/project.webp",
+        "/images/logo.svg",
+    ):
+        assert (
+            resolve_link_url(
+                base_url="https://example.com/",
+                raw_href=href,
+            )
+            is None
+        )
+
+
+def test_rejects_malformed_port() -> None:
+    assert (
+        resolve_link_url(
+            base_url="https://example.com/",
+            raw_href="https://example.com: CZ003521643",
+        )
+        is None
+    )
+
+
+def test_accepts_supported_pdf() -> None:
+    result = resolve_link_url(
+        base_url="https://example.com/fund/",
+        raw_href="../documents/statute.pdf",
+    )
+
+    assert result == "https://example.com/documents/statute.pdf"
+
+    assert result is not None
+
+    assert is_direct_document_url(result)
+
+
+def test_direct_document_rejects_images() -> None:
+    assert not is_direct_document_url("https://example.com/project.webp")
+
+
+def test_rejects_bare_email_relative_link() -> None:
+    assert (
+        resolve_link_url(
+            base_url="https://example.com/en/",
+            raw_href="info@example.com",
+        )
+        is None
+    )
+
+
+def test_rejects_bare_phone_relative_link() -> None:
+    assert (
+        resolve_link_url(
+            base_url="https://example.com/funds/",
+            raw_href=("+420734732715(proostatníinvestory)"),
+        )
+        is None
+    )
+
+
+def test_rejects_prefixed_relative_email_link() -> None:
+    assert (
+        resolve_link_url(
+            base_url="https://example.com/",
+            raw_href="de/info@example.com/",
+        )
+        is None
+    )
+
+    assert (
+        resolve_link_url(
+            base_url="https://example.com/",
+            raw_href="en/info@example.com/",
+        )
+        is None
+    )
+
+
+def test_rejects_phone_with_description() -> None:
+    assert (
+        resolve_link_url(
+            base_url="https://example.com/funds/",
+            raw_href=("+420734732715(proostatníinvestory)"),
+        )
+        is None
     )

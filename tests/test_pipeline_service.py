@@ -163,3 +163,75 @@ def test_runs_complete_pipeline_for_one_fund(
     assert report_payload["completed"] == 1
 
     assert report_payload["failed"] == 0
+
+
+def test_pipeline_can_use_avant_as_explicit_fallback(
+    tmp_path: Path,
+) -> None:
+    fund = FundInput(
+        name="Example SICAV a.s.",
+        web="https://example.com/",
+    )
+
+    database_path = tmp_path / "fundscraper.sqlite3"
+    output_path = tmp_path / "funds.enriched.json"
+
+    initialize_database(database_path)
+    register_funds(
+        database_path,
+        [fund],
+    )
+    synchronize_output_file(
+        funds=[fund],
+        output_path=output_path,
+    )
+
+    html = b"""
+    <!doctype html>
+    <html>
+      <body>
+        <h1>Example SICAV a.s.</h1>
+        <p>Doporuceny investicni horizont je 5 let.</p>
+      </body>
+    </html>
+    """
+
+    async def handler(
+        request: httpx.Request,
+    ) -> httpx.Response:
+        return httpx.Response(
+            status_code=200,
+            headers={
+                "Content-Type": "text/html",
+            },
+            content=html,
+            request=request,
+        )
+
+    async def run_test() -> None:
+        settings = HttpSettings(
+            max_retries=0,
+            retry_min_wait_seconds=0,
+            retry_max_wait_seconds=0,
+        )
+
+        async with HttpFetcher(
+            settings,
+            tmp_path / "http",
+            transport=httpx.MockTransport(handler),
+        ) as fetcher:
+            result = await run_fund_pipeline(
+                database_path=database_path,
+                output_path=output_path,
+                parsed_directory=(tmp_path / "parsed"),
+                fund=fund,
+                fetcher=fetcher,
+                max_pages=2,
+                max_depth=0,
+                max_documents=0,
+                avant_fallback=True,
+            )
+
+        assert result.adapter_name == "avantfunds"
+
+    asyncio.run(run_test())

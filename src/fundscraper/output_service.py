@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from fundscraper.output_models import (
     InvestmentHorizonValue,
     MinimumInvestmentValue,
     ProcessingMetadata,
+    ProcessingStatus,
     TargetReturnValue,
 )
 
@@ -161,4 +163,123 @@ def write_output_schema(path: Path) -> None:
         )
         + "\n",
         encoding="utf-8",
+    )
+
+
+RETRY_FIELD_NAMES = (
+    "investment_horizon",
+    "minimum_investment",
+    "target_return",
+    "fees",
+    "assets_under_management",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RetryMergeSummary:
+    candidates: int
+    replaced: int
+    preserved: int
+    missing_candidates: int
+
+
+def fund_output_quality(
+    output: FundOutput,
+) -> tuple[int, int, int]:
+    """Return a deterministic quality tuple for retry-result comparison."""
+
+    status_weights = {
+        FieldStatus.FOUND: 100,
+        FieldStatus.CONFLICTING: 30,
+        FieldStatus.AMBIGUOUS: 20,
+        FieldStatus.NOT_FOUND: 10,
+        FieldStatus.ERROR: 0,
+        FieldStatus.PENDING: -1,
+    }
+
+    statuses = [
+        getattr(
+            output,
+            field_name,
+        ).status
+        for field_name in RETRY_FIELD_NAMES
+    ]
+
+    found_count = sum(1 for status in statuses if status is FieldStatus.FOUND)
+
+    weighted_status = sum(status_weights[status] for status in statuses)
+
+    processing_weights = {
+        ProcessingStatus.COMPLETED: 4,
+        ProcessingStatus.PARTIAL: 3,
+        ProcessingStatus.IN_PROGRESS: 2,
+        ProcessingStatus.PENDING: 1,
+        ProcessingStatus.FAILED: 0,
+    }
+
+    return (
+        found_count,
+        weighted_status,
+        processing_weights[output.processing.status],
+    )
+
+
+def merge_improved_outputs(
+    *,
+    base_outputs: list[FundOutput],
+    retry_outputs: list[FundOutput],
+    retry_fund_ids: set[str],
+    minimum_found_improvement: int = 1,
+) -> tuple[list[FundOutput], RetryMergeSummary]:
+    """Merge only strictly better retry results into the master output."""
+
+    if minimum_found_improvement < 0:
+        raise ValueError("minimum_found_improvement must be non-negative")
+
+    retry_by_id = {output.fund_id: output for output in retry_outputs}
+
+    merged_outputs: list[FundOutput] = []
+
+    replaced = 0
+    preserved = 0
+    missing_candidates = 0
+
+    for base_output in base_outputs:
+        if base_output.fund_id not in retry_fund_ids:
+            merged_outputs.append(base_output)
+            continue
+
+        candidate = retry_by_id.get(base_output.fund_id)
+
+        if candidate is None:
+            missing_candidates += 1
+            preserved += 1
+            merged_outputs.append(base_output)
+            continue
+
+        base_quality = fund_output_quality(base_output)
+
+        candidate_quality = fund_output_quality(candidate)
+
+        found_improvement = candidate_quality[0] - base_quality[0]
+
+        should_replace = (
+            found_improvement >= minimum_found_improvement and candidate_quality > base_quality
+        )
+
+        if should_replace:
+            merged_outputs.append(candidate)
+            replaced += 1
+        else:
+            merged_outputs.append(base_output)
+            preserved += 1
+
+    return (
+        merged_outputs,
+        RetryMergeSummary(
+            candidates=len(retry_fund_ids),
+            replaced=replaced,
+            preserved=preserved,
+            missing_candidates=missing_candidates,
+        ),
     )

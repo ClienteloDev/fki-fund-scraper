@@ -11,7 +11,9 @@ from fundscraper.output_models import FieldStatus
 from fundscraper.output_service import (
     OutputFileError,
     create_pending_output,
+    fund_output_quality,
     load_output,
+    merge_improved_outputs,
     stable_fund_id,
     write_output,
     write_output_schema,
@@ -108,3 +110,80 @@ def test_write_output_schema(
 
     assert payload["type"] == "array"
     assert "$defs" in payload
+
+
+def test_retry_merge_replaces_only_better_result() -> None:
+    fund = FundInput(
+        name="Example SICAV a.s.",
+        web="https://example.com",
+    )
+
+    base = create_pending_output([fund])[0]
+
+    one_found = base.model_copy(
+        update={
+            "investment_horizon": (
+                base.investment_horizon.model_copy(
+                    update={
+                        "status": FieldStatus.FOUND,
+                    }
+                )
+            )
+        }
+    )
+
+    two_found = one_found.model_copy(
+        update={
+            "minimum_investment": (
+                one_found.minimum_investment.model_copy(
+                    update={
+                        "status": FieldStatus.FOUND,
+                    }
+                )
+            )
+        }
+    )
+
+    merged, summary = merge_improved_outputs(
+        base_outputs=[one_found],
+        retry_outputs=[two_found],
+        retry_fund_ids={one_found.fund_id},
+        minimum_found_improvement=1,
+    )
+
+    assert merged == [two_found]
+    assert summary.replaced == 1
+    assert summary.preserved == 0
+
+
+def test_retry_merge_preserves_result_without_required_improvement() -> None:
+    fund = FundInput(
+        name="Example SICAV a.s.",
+        web="https://example.com",
+    )
+
+    base = create_pending_output([fund])[0]
+
+    one_found = base.model_copy(
+        update={
+            "investment_horizon": (
+                base.investment_horizon.model_copy(
+                    update={
+                        "status": FieldStatus.FOUND,
+                    }
+                )
+            )
+        }
+    )
+
+    merged, summary = merge_improved_outputs(
+        base_outputs=[one_found],
+        retry_outputs=[one_found],
+        retry_fund_ids={one_found.fund_id},
+        minimum_found_improvement=1,
+    )
+
+    assert merged == [one_found]
+    assert summary.replaced == 0
+    assert summary.preserved == 1
+    assert fund_output_quality(one_found)[0] == 1

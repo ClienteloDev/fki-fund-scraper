@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit
 
 from selectolax.lexbor import LexborHTMLParser
 
@@ -181,6 +182,35 @@ DOWNLOAD_KEYWORDS = (
     "pdf",
 )
 
+BARE_EMAIL_PATTERN = re.compile(
+    r"""
+    ^
+    [^/\s@]+
+    @
+    [^/\s@]+
+    \.
+    [^/\s@]+
+    /?
+    $
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+BARE_PHONE_PATTERN = re.compile(
+    r"""
+    ^
+    \+?
+    \d[\d\s.-]{6,}
+    (?:
+        \([^)]*\)
+    )?
+    /?
+    $
+    """,
+    re.VERBOSE,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class DiscoveredLink:
@@ -324,48 +354,112 @@ def parse_html_page(
     )
 
 
+BLOCKED_LINK_PREFIXES = (
+    "#",
+    "mailto:",
+    "tel:",
+    "sms:",
+    "javascript:",
+    "data:",
+    "blob:",
+)
+
+BLOCKED_PATH_FRAGMENTS = ("/cdn-cgi/l/email-protection",)
+
+BLOCKED_ASSET_EXTENSIONS = frozenset(
+    {
+        ".avif",
+        ".bmp",
+        ".eot",
+        ".gif",
+        ".ico",
+        ".jpeg",
+        ".jpg",
+        ".mov",
+        ".mp3",
+        ".mp4",
+        ".ogg",
+        ".otf",
+        ".png",
+        ".rar",
+        ".svg",
+        ".tif",
+        ".tiff",
+        ".ttf",
+        ".wav",
+        ".webm",
+        ".webp",
+        ".woff",
+        ".woff2",
+        ".zip",
+        ".7z",
+    }
+)
+
+
 def resolve_link_url(
     *,
     base_url: str,
     raw_href: str,
 ) -> str | None:
-    """Convert an HTML href into a usable absolute HTTP URL."""
+    """
+    Resolve an HTTP link without allowing malformed, contact or asset URLs.
 
-    stripped_href = raw_href.strip()
+    Invalid links are skipped locally instead of terminating processing
+    of the entire fund. URL fragments are removed so the same document
+    is not crawled repeatedly under different anchors.
+    """
 
-    if not stripped_href:
+    cleaned_href = html.unescape(raw_href).strip()
+
+    if not cleaned_href:
         return None
 
-    lowered_href = stripped_href.casefold()
+    lowered_href = cleaned_href.casefold()
 
-    if lowered_href.startswith(SKIPPED_URL_PREFIXES):
+    if lowered_href.startswith(BLOCKED_LINK_PREFIXES):
         return None
 
-    resolved_url = urljoin(
-        base_url,
-        stripped_href,
-    )
+    if _looks_like_contact_link(cleaned_href):
+        return None
 
-    parsed = urlsplit(resolved_url)
+    try:
+        resolved_url = urljoin(
+            base_url,
+            cleaned_href,
+        )
 
-    if parsed.scheme.lower() not in {
+        parsed = urlsplit(resolved_url)
+
+        # Forces validation of malformed ports, for example:
+        # https://example.com: CZ003521643
+        _ = parsed.port
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return None
+
+    if parsed.scheme.casefold() not in {
         "http",
         "https",
     }:
         return None
 
-    if parsed.hostname is None:
+    if not parsed.hostname:
         return None
 
-    return urlunsplit(
-        (
-            parsed.scheme.lower(),
-            parsed.netloc,
-            parsed.path or "/",
-            parsed.query,
-            "",
-        )
-    )
+    normalized_path = parsed.path.casefold()
+
+    if any(fragment in normalized_path for fragment in BLOCKED_PATH_FRAGMENTS):
+        return None
+
+    extension = PurePosixPath(normalized_path).suffix
+
+    if extension in BLOCKED_ASSET_EXTENSIONS:
+        return None
+
+    return parsed._replace(fragment="").geturl()
 
 
 def classify_link(
@@ -442,16 +536,34 @@ def classify_link(
     )
 
 
+DIRECT_DOCUMENT_EXTENSIONS = frozenset(
+    {
+        ".pdf",
+        ".xhtml",
+        ".xml",
+        ".txt",
+    }
+)
+
+
 def is_direct_document_url(
     url: str,
 ) -> bool:
-    """Return whether the URL path has a supported document extension."""
+    """Return whether the URL points to a supported document format."""
 
-    path = urlsplit(url).path
+    try:
+        parsed = urlsplit(url)
 
-    suffix = PurePosixPath(path).suffix.casefold()
+        _ = parsed.port
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return False
 
-    return suffix in DOCUMENT_EXTENSIONS
+    extension = PurePosixPath(parsed.path.casefold()).suffix
+
+    return extension in DIRECT_DOCUMENT_EXTENSIONS
 
 
 def normalize_search_text(
@@ -573,3 +685,68 @@ def _normalize_visible_text(
         " ",
         value,
     ).strip()
+
+
+def _looks_like_contact_link(
+    value: str,
+) -> bool:
+    """
+    Detect email addresses and phone numbers incorrectly stored in href.
+
+    Supported invalid examples:
+    - info@example.com
+    - de/info@example.com/
+    - en/info@example.com/
+    - +420123456789
+    - +420123456789(pro-investory)
+    """
+
+    candidate = value.strip()
+
+    if not candidate:
+        return False
+
+    lowered_candidate = candidate.casefold()
+
+    if lowered_candidate.startswith(
+        (
+            "http://",
+            "https://",
+        )
+    ):
+        return False
+
+    path_segments = [
+        segment.strip() for segment in candidate.strip("/").split("/") if segment.strip()
+    ]
+
+    if not path_segments:
+        return False
+
+    for segment in path_segments:
+        decoded_segment = segment.strip()
+
+        if re.fullmatch(
+            r"[^@\s/]+@[^@\s/]+\.[^@\s/]+",
+            decoded_segment,
+            flags=re.IGNORECASE,
+        ):
+            return True
+
+    last_segment = path_segments[-1]
+
+    phone_candidate = re.sub(
+        r"\([^)]*\)\s*$",
+        "",
+        last_segment,
+    )
+
+    compact_phone = re.sub(
+        r"[\s().-]",
+        "",
+        phone_candidate,
+    )
+
+    digits = compact_phone[1:] if compact_phone.startswith("+") else compact_phone
+
+    return digits.isdigit() and len(digits) >= 7
