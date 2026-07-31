@@ -1,0 +1,19 @@
+services:
+  fundscraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    working_dir: /app
+
+    volumes:
+      - ./data/input:/app/data/input:ro
+      - ./data/output:/app/data/output
+      - ./cache:/app/cache
+      - ./reports:/app/reports
+
+    environment:
+      PYTHONUNBUFFERED: "1"
+
+    command:
+      - "--help"
