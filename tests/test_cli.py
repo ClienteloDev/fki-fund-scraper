@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from typer.core import TyperGroup
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from fundscraper.cli import app
@@ -364,14 +366,47 @@ def test_run_retry_help() -> None:
             "run-retry",
             "--help",
         ],
-        terminal_width=240,
     )
 
     assert result.exit_code == 0
-    assert "--master-input" in result.stdout
-    assert "--retry-output" in result.stdout
-    assert "--avant-fallback" in result.stdout
-    assert "--amista-fallback" in result.stdout
-    assert "--porovnejfondy-fallback" in result.stdout
-    assert "--concurrency" in result.stdout
-    assert "--document-concurrency" in result.stdout
+
+    root_command = get_command(app)
+
+    assert isinstance(
+        root_command,
+        TyperGroup,
+    )
+
+    run_retry_command = root_command.commands["run-retry"]
+
+    option_names = {
+        option
+        for parameter in run_retry_command.params
+        for option in (
+            *getattr(
+                parameter,
+                "opts",
+                [],
+            ),
+            *getattr(
+                parameter,
+                "secondary_opts",
+                [],
+            ),
+        )
+    }
+
+    assert "--master-input" in option_names
+    assert "--retry-output" in option_names
+
+    assert "--avant-fallback" in option_names
+    assert "--no-avant-fallback" in option_names
+
+    assert "--amista-fallback" in option_names
+    assert "--no-amista-fallback" in option_names
+
+    assert "--porovnejfondy-fallback" in option_names
+    assert "--no-porovnejfondy-fallback" in option_names
+
+    assert "--concurrency" in option_names
+    assert "--document-concurrency" in option_names
