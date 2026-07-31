@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fundscraper.domain_adapters.registry import (
+    get_amista_fallback_adapter,
     get_avant_fallback_adapter,
     get_domain_adapter,
 )
@@ -56,3 +57,31 @@ def test_returns_avant_fallback_adapter_for_unknown_domain() -> None:
     adapter = get_avant_fallback_adapter()
 
     assert adapter.name == "avantfunds"
+
+
+def test_returns_bhs_adapter() -> None:
+    fund = FundInput(
+        name="BHS DYNAMIC FUND SICAV, a.s.",
+        web="https://www.bhs.cz/fondy",
+    )
+
+    adapter = get_domain_adapter(fund)
+
+    assert adapter is not None
+    assert adapter.name == "bhs"
+
+
+def test_returns_amista_adapter() -> None:
+    fund = FundInput(
+        name="Example SICAV a.s.",
+        web="https://www.amista.cz/example.html",
+    )
+
+    adapter = get_domain_adapter(fund)
+
+    assert adapter is not None
+    assert adapter.name == "amista"
+
+
+def test_returns_amista_fallback_adapter() -> None:
+    assert get_amista_fallback_adapter().name == "amista"

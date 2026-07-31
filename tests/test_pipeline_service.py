@@ -235,3 +235,91 @@ def test_pipeline_can_use_avant_as_explicit_fallback(
         assert result.adapter_name == "avantfunds"
 
     asyncio.run(run_test())
+
+
+def test_batch_processes_multiple_funds_concurrently(
+    tmp_path: Path,
+) -> None:
+    funds = [
+        FundInput(
+            name=f"Example {index} SICAV a.s.",
+            web=f"https://fund-{index}.example/",
+        )
+        for index in range(3)
+    ]
+    database_path = tmp_path / "fundscraper.sqlite3"
+    output_path = tmp_path / "funds.enriched.json"
+
+    initialize_database(database_path)
+    register_funds(database_path, funds)
+    synchronize_output_file(
+        funds=funds,
+        output_path=output_path,
+    )
+
+    active_requests = 0
+    maximum_active_requests = 0
+
+    async def handler(
+        request: httpx.Request,
+    ) -> httpx.Response:
+        nonlocal active_requests, maximum_active_requests
+
+        active_requests += 1
+        maximum_active_requests = max(
+            maximum_active_requests,
+            active_requests,
+        )
+        await asyncio.sleep(0.05)
+        fund_number = str(request.url.host).split("-")[1].split(".")[0]
+        html = f"""
+        <html><body>
+          <h1>Example {fund_number} SICAV a.s.</h1>
+          <p>Doporuceny investicni horizont je 5 let.</p>
+        </body></html>
+        """.encode()
+        active_requests -= 1
+
+        return httpx.Response(
+            status_code=200,
+            headers={"Content-Type": "text/html"},
+            content=html,
+            request=request,
+        )
+
+    async def run_test() -> None:
+        settings = HttpSettings(
+            max_retries=0,
+            max_concurrency=10,
+            max_per_domain_concurrency=1,
+            requests_per_second=100,
+            retry_min_wait_seconds=0,
+            retry_max_wait_seconds=0,
+        )
+
+        async with HttpFetcher(
+            settings,
+            tmp_path / "http",
+            transport=httpx.MockTransport(handler),
+        ) as fetcher:
+            summary = await run_fund_batch(
+                database_path=database_path,
+                output_path=output_path,
+                parsed_directory=tmp_path / "parsed",
+                funds=funds,
+                fetcher=fetcher,
+                max_pages=1,
+                max_depth=0,
+                max_documents=0,
+                concurrency=3,
+            )
+
+        assert summary.requested == 3
+
+    asyncio.run(run_test())
+
+    assert maximum_active_requests >= 2
+
+    output = load_output(output_path)
+    assert len(output) == 3
+    assert all(item.investment_horizon.status is FieldStatus.FOUND for item in output)
