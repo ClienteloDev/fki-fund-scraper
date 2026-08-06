@@ -11,6 +11,7 @@ from fundscraper.domain_adapters.base import (
 from fundscraper.html_discovery import (
     DiscoveredLink,
     classify_link,
+    decode_html_bytes,
     is_direct_document_url,
     normalize_search_text,
     resolve_link_url,
@@ -327,7 +328,7 @@ def parse_avant_catalog_page(
     if not body:
         return None
 
-    parser = LexborHTMLParser(body)
+    parser = LexborHTMLParser(decode_html_bytes(body))
 
     container = _find_fund_container(
         parser=parser,

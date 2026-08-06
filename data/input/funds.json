@@ -204,6 +204,10 @@
     "web": "https://www.4gimel.cz/en/"
   },
   {
+    "name": "ADAX Fond firemního nástupnictví SICAV, a.s.",
+    "web": "https://www.adaxinvest.cz/"
+  },
+  {
     "name": "AMADEUS SICAV a.s.",
     "web": "https://www.amadeusfond.cz"
   },
@@ -212,8 +216,16 @@
     "web": "https://www.ambeatequity.cz"
   },
   {
+    "name": "AMBEAT INVEST SICAV, a.s.",
+    "web": "https://www.codyainvest.cz/nase-fondy/ambeat-invest-sicav-a-s"
+  },
+  {
     "name": "ARETE ENERGY TRANSITION SICAV a.s.",
     "web": "https://arete.eu/fund-arete-energy-transition/"
+  },
+  {
+    "name": "ARETE INDUSTRIAL SICAV a.s.",
+    "web": "https://www.arete.eu/"
   },
   {
     "name": "AVANT LOAN SICAV, a.s.",
@@ -226,6 +238,10 @@
   {
     "name": "Apex Capital SICAV a.s.",
     "web": "https://apexcapital.cz"
+  },
+  {
+    "name": "BRIXX SICAV, a.s.",
+    "web": "https://www.brixx.cz/"
   },
   {
     "name": "Bohemian Empire, investiční fond s proměnným základním kapitálem, a.s.",
@@ -242,6 +258,10 @@
   {
     "name": "DEKINVEST, investiční fond s proměnným základním kapitálem, a.s.",
     "web": "https://www.dekinvest.cz"
+  },
+  {
+    "name": "DOMOPLAN SICAV, a.s.",
+    "web": "https://www.domoplan.eu/"
   },
   {
     "name": "DRFG Investment Fund SICAV a.s.",
@@ -292,6 +312,10 @@
     "web": "https://luxentfund.cz"
   },
   {
+    "name": "MAM Private Equity Fund SICAV a.s.",
+    "web": "https://www.mam-equity.cz/"
+  },
+  {
     "name": "MARLO FUND SICAV a.s.",
     "web": "https://marlofund.cz"
   },
@@ -310,6 +334,10 @@
   {
     "name": "ResInvest Fund SICAV a.s.",
     "web": "https://www.resinvest.eu"
+  },
+  {
+    "name": "SALUTEM FUND SICAV, a.s.",
+    "web": "https://salutemfund.cz/"
   },
   {
     "name": "SNP INVEST, investiční fond, a.s.",
@@ -336,6 +364,10 @@
     "web": "https://www.fondlesu.cz"
   },
   {
+    "name": "AVANT GROUP SICAV, a.s.",
+    "web": "https://avantgroup.cz/"
+  },
+  {
     "name": "Albatris Special Opportunity Fund SICAV a.s.",
     "web": "https://www.albatrisfond.cz"
   },
@@ -348,12 +380,24 @@
     "web": "https://caspyan.group"
   },
   {
+    "name": "CORE CAPITAL SICAV, a.s.",
+    "web": "https://corecapital.cz/"
+  },
+  {
     "name": "CREDITAS LOAN SICAV a.s.",
     "web": "https://deltais.cz/en/fondy/creditas-loan-sicav-a-s"
   },
   {
+    "name": "Czech Capital Fund SICAV, a.s.",
+    "web": "https://ccfs.cz/"
+  },
+  {
     "name": "DIAGRAM IRQ Funds SICAV a.s.",
     "web": "https://www.irqfunds.com/en"
+  },
+  {
+    "name": "DOMOPLAN - Na Mariánské cestě SICAV, a.s.",
+    "web": "https://www.domoplanfund.eu/cs/fond/domoplan-na-marianske-ceste-sicav-a-s-3DEQIu"
   },
   {
     "name": "DOMOPLAN - Pekárenský dvůr SICAV, a.s.",
@@ -372,8 +416,16 @@
     "web": "https://www.fckd.cz"
   },
   {
+    "name": "FRANCO SICAV, a.s.",
+    "web": "https://www.francofond.cz/"
+  },
+  {
     "name": "Falanga Invest SICAV a.s.",
     "web": "https://www.falanga-invest.cz"
+  },
+  {
+    "name": "GARTAL Investment fund SICAV a.s.",
+    "web": "https://fond.gartal.cz/"
   },
   {
     "name": "GoBuzz SICAV, a.s.",
@@ -382,6 +434,10 @@
   {
     "name": "HENRY IF SICAV a.s.",
     "web": "https://www.artefin.cz"
+  },
+  {
+    "name": "INVEST GATE Funds SICAV a.s.",
+    "web": "https://investgate.cz/funds/"
   },
   {
     "name": "JTFG FUND V SICAV, a.s.",
@@ -408,6 +464,10 @@
     "web": "https://spinoffy.com"
   },
   {
+    "name": "Volarik Capital SICAV a.s.",
+    "web": "https://volarikcapital.eu/"
+  },
+  {
     "name": "Český fond SICAV, a.s.",
     "web": "https://ceskyfond.cz"
   },
@@ -418,6 +478,10 @@
   {
     "name": "Adversum SICAV, a.s.",
     "web": "https://www.tillerfunds.cz/cs/portfolio/adversum-sicav"
+  },
+  {
+    "name": "Aequitas Capital Investment SICAV a.s.",
+    "web": "https://www.aequitasgroup.eu/cs/investujte-s-nami/dluhopisy/"
   },
   {
     "name": "Aurelia fondy SICAV a.s.",
@@ -468,12 +532,20 @@
     "web": "https://avantfunds.cz"
   },
   {
+    "name": "Cornerstone Investments SICAV, a.s.",
+    "web": "https://www.cornerstone.cz/"
+  },
+  {
     "name": "Czech Development Fund SICAV, a.s.",
     "web": "https://www.cdfs.cz/en"
   },
   {
     "name": "Czech Stability Fund SICAV a.s.",
     "web": "https://czechstabilityfund.cz"
+  },
+  {
+    "name": "Dimension investiční fond SICAV a.s.",
+    "web": "https://www.dimension.cz/"
   },
   {
     "name": "EAG Funds SICAV a.s.",
@@ -494,6 +566,10 @@
   {
     "name": "Evermore Capital Management a.s., SICAV",
     "web": "https://evermore.capital"
+  },
+  {
+    "name": "FINEZ SICAV a.s.",
+    "web": "https://www.finez.cz/"
   },
   {
     "name": "Generalist Capital Management SICAV, a.s.",
@@ -640,6 +716,10 @@
     "web": "https://ascavia.cz"
   },
   {
+    "name": "AVANT Private Equity SICAV, a.s.",
+    "web": "https://www.avantfunds.cz/fondy/avant-private-equity-fund-sicav-a-s/"
+  },
+  {
     "name": "Accolade Assets Fund SICAV, a.s.",
     "web": "https://accoladefunds.eu"
   },
@@ -716,6 +796,14 @@
     "web": "https://gtf.cz"
   },
   {
+    "name": "IROMET SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "JF Fund SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
     "name": "JTFG FUND III SICAV, a.s.",
     "web": "https://jtis.cz"
   },
@@ -730,6 +818,10 @@
   {
     "name": "Long Capital SICAV a.s.",
     "web": "https://www.longcapital.cz"
+  },
+  {
+    "name": "MERITY investiční fond, SICAV, a.s.",
+    "web": "https://www.merity.cz/"
   },
   {
     "name": "Mint Fund Commercial SICAV, a.s.",
@@ -792,6 +884,10 @@
     "web": "https://tomhol.cz"
   },
   {
+    "name": "Triatleta fund SICAV, a.s.",
+    "web": "https://triatleta.cz/"
+  },
+  {
     "name": "UDI Group SICAV a.s.",
     "web": "https://urban-developers.com"
   },
@@ -812,52 +908,208 @@
     "web": "https://ydealfunds.cz"
   },
   {
+    "name": "ZDR Investments Industrial SICAV a.s.",
+    "web": "https://www.zdrinvestments.cz/fund/industrial"
+  },
+  {
+    "name": "271 SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
     "name": "ART PALACE Fund SICAV a.s.",
     "web": "https://artpalacefund.com"
+  },
+  {
+    "name": "ASOLERO SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
   },
   {
     "name": "AVANT BESS SICAV, a.s.",
     "web": "https://avantfunds.cz"
   },
   {
+    "name": "AVANT ENERGY SICAV, a.s.",
+    "web": "https://avantenergy.cz/"
+  },
+  {
+    "name": "Algorithmic SICAV a.s.",
+    "web": "https://www.algorithmic-sicav.cz/"
+  },
+  {
+    "name": "Aristoteles Fund SICAV, a.s.",
+    "web": "https://aristotelesfond.cz/"
+  },
+  {
     "name": "BHS ICONIC CARS SICAV, a.s.",
     "web": "https://www.bhs.cz/fondy/bhs-iconic-cars"
+  },
+  {
+    "name": "BRODIS INVEST SICAV a.s.",
+    "web": "https://brodis.cz/"
+  },
+  {
+    "name": "Broker Consulting FKI SICAV, a.s.",
+    "web": "https://monecois.cz/informace-o-fondu-broker-consulting-fki-sicav/"
+  },
+  {
+    "name": "Broker Consulting SICAV, a.s.",
+    "web": "https://monecois.cz/informace-o-fondu-broker-consulting-sicav/"
+  },
+  {
+    "name": "Budějovická investiční fond s proměnným základním kapitálem, a.s.",
+    "web": "https://www.budejovicka.cz/kontakty"
   },
   {
     "name": "CCD FOOD SICAV, a.s.",
     "web": "https://ccfs.cz"
   },
   {
+    "name": "CE 2 SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "CEERE Opportunity SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "CFH investiční fond SICAV, a.s.",
+    "web": "https://deltais.cz/fondy/cfh-investicni-fond-sicav-a-s"
+  },
+  {
+    "name": "City Logistic Property Fund SICAV a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "Czech Investment Fund SICAV, a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "DIRECT VIGO SICAV, a.s.",
+    "web": "https://www.directinvestments.cz/fondy"
+  },
+  {
+    "name": "ENPO Group SICAV, a.s.",
+    "web": "https://enpogroup.cz/investice/"
+  },
+  {
     "name": "ESG HOLDING SICAV, a.s.",
     "web": "https://www.avantfunds.cz/"
+  },
+  {
+    "name": "EVROPA Investiční Fond SICAV a.s.",
+    "web": "https://www.evropa-fond.cz/"
+  },
+  {
+    "name": "FLETCHER SICAV, a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "FMP SICAV a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "FestLen SICAV a.s.",
+    "web": null
+  },
+  {
+    "name": "First Veterinary Fund Central Europe SICAV a.s.",
+    "web": "https://www.vetfund.cz/en/"
+  },
+  {
+    "name": "Fond Fondů NLS SICAV, a.s.",
+    "web": "https://www.jtis.cz/archiv-dokumentu-fondu/fond-fondu-nls-sicav-a-s"
+  },
+  {
+    "name": "Fond Českého Bydlení SICAV, a.s.",
+    "web": "https://www.fondbydleni.cz/"
   },
   {
     "name": "Fortress Fusion Fund SICAV, a.s.",
     "web": "https://encoram.com"
   },
   {
+    "name": "G Futura SICAV a.s.",
+    "web": null
+  },
+  {
+    "name": "GLAMOUR Fund SICAV, a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "Georgia Energy SICAV a.s.",
+    "web": "https://www.codyainvest.cz/nase-fondy/georgia-energy-sicav-a-s-trida-c"
+  },
+  {
     "name": "Green Ruby SICAV, a.s.",
     "web": "https://magnainvest.cz"
+  },
+  {
+    "name": "HARTENBERG INVESTMENT FUND SICAV, a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "HPT investiční fond s proměnným základním kapitálem, a.s.",
+    "web": "https://www.hptfond-as.cz/"
   },
   {
     "name": "HZ Trust SICAV, a.s.",
     "web": "https://cyrrusis.cz"
   },
   {
+    "name": "ID-SICAV Fund, a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
     "name": "JSK Investments SICAV a.s.",
     "web": "https://jskinvestments.cz"
+  },
+  {
+    "name": "JTFG FUND IV SICAV, a.s.",
+    "web": "https://www.jtfg.com"
+  },
+  {
+    "name": "Look AI Ventures SICAV, a.s.",
+    "web": "https://lookai.vc/"
+  },
+  {
+    "name": "M&Y land SICAV a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
   },
   {
     "name": "MAVERICK Fund SICAV, a.s.",
     "web": "https://www.versuteis.cz"
   },
   {
+    "name": "MOF INVEST uzavřený investiční fond, a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "MONUMENTUM Fund SICAV a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
     "name": "MTK Invest SICAV, a.s.",
     "web": "https://www.encoram.com"
   },
   {
+    "name": "MaeG Investment SICAV a.s.",
+    "web": "https://maeginvestment.cz/"
+  },
+  {
+    "name": "Maloja Investment SICAV a.s.",
+    "web": "https://www.malojainvestment.cz/"
+  },
+  {
     "name": "Mauricius SICAV a.s.",
     "web": "https://nwd.cz"
+  },
+  {
+    "name": "Mezzanine Capital Fund SICAV, a.s.",
+    "web": "https://www.mcfund.cz/"
+  },
+  {
+    "name": "NB Investment SICAV, a.s.",
+    "web": "https://www.nbinvestment.cz/"
   },
   {
     "name": "NOVA Real Estate, investiční fond s proměnným základním kapitálem, a.s.",
@@ -884,6 +1136,10 @@
     "web": "https://www.pontiro.cz"
   },
   {
+    "name": "PT Equity Investments SICAV, a.s.",
+    "web": "https://www.jtis.cz/archiv-dokumentu-fondu/pt-equity-investments-sicav-a-s"
+  },
+  {
     "name": "Progresus Fund SICAV a.s.",
     "web": "https://progresusam.cz"
   },
@@ -892,12 +1148,48 @@
     "web": "https://www.spmgroup.cz"
   },
   {
+    "name": "TRINITY Real Estate Fund SICAV a.s.",
+    "web": null
+  },
+  {
+    "name": "Threee Fund SICAV a.s.",
+    "web": "https://www.threee.cz/"
+  },
+  {
     "name": "UNIMEX GROUP, uzavřený investiční fond, a.s.",
     "web": "https://www.ug-if.cz"
   },
   {
+    "name": "URBAU SICAV, a.s.",
+    "web": "https://www.urbau.cz/cs/home"
+  },
+  {
+    "name": "VERNE CAPITAL SICAV, a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "VIGO PUBLIC SICAV a.s.",
+    "web": "https://www.directinvestments.cz/fondy"
+  },
+  {
+    "name": "ViDa Capital SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "VivInvest fund SICAV, a.s.",
+    "web": "https://vivinvest.cz/"
+  },
+  {
+    "name": "WARHOLD Fund SICAV a.s.",
+    "web": "https://warhold.cz/"
+  },
+  {
     "name": "WF Group SICAV a.s.",
     "web": "https://wfgroup.cz/"
+  },
+  {
+    "name": "Zephyr Investments SICAV, a.s.",
+    "web": "https://www.tillerfunds.cz/cs/portfolio/zephyr-investments-sicav"
   },
   {
     "name": "AGROCORE SICAV, a.s.",
@@ -908,12 +1200,164 @@
     "web": "https://akro.cz"
   },
   {
+    "name": "AOP FOND, SICAV, a.s.",
+    "web": "https://www.redsidefunds.com/cs/fondy/aop-fond"
+  },
+  {
+    "name": "ATERNUS SICAV, a.s.",
+    "web": "https://aternus.cz/cz/"
+  },
+  {
+    "name": "CDP SICAV, a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "COLBER INVEST FOND SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "COMES invest, investiční fond s proměnným základním kapitálem, a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "Compact Property Fund, investiční fond s proměnným základním kapitálem, a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "Convenio, investiční fond s proměnným základním kapitálem, a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "Credit Easy Invest SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "FOCUS INVEST, investiční fond s proměnným základním kapitálem, a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "Fond udržitelnosti Římskokatolické církve, investiční fond s proměnným základním kapitálem, a. s.",
+    "web": null
+  },
+  {
+    "name": "Good Value Investments SICAV, a.s.",
+    "web": "https://www.goodvalue.cz/"
+  },
+  {
+    "name": "IFIS investiční fond, a.s.",
+    "web": "https://www.ifis.cz/"
+  },
+  {
+    "name": "INFOND investiční fond s proměnným základním kapitálem, a.s.",
+    "web": "https://www.infond.cz/pro-investory/"
+  },
+  {
+    "name": "Importo SICAV a.s.",
+    "web": null
+  },
+  {
+    "name": "InnoBridge SICAV a.s.",
+    "web": null
+  },
+  {
+    "name": "Jet 2 SICAV, a.s.",
+    "web": "https://www.jetinvestment.cz/en/regulatory-informations"
+  },
+  {
+    "name": "LOAN MANAGEMENT investiční fond, a.s.",
+    "web": "https://loanmanagement.cz/"
+  },
+  {
+    "name": "LUCROS SICAV a.s.",
+    "web": "https://lucros.cz/"
+  },
+  {
+    "name": "MIF SICAV, a.s.",
+    "web": null
+  },
+  {
+    "name": "Mabon investiční fond s proměnným základním kapitálem a.s.",
+    "web": "https://www.mabon.info/"
+  },
+  {
+    "name": "Orinoco Invest SICAV a.s.",
+    "web": "https://www.amista.cz/povinne-informace.html"
+  },
+  {
+    "name": "Orquesta investment SICAV, a.s.",
+    "web": null
+  },
+  {
+    "name": "PROPERITY FUND SICAV, a.s.",
+    "web": "https://www.winstor.cz/funds/detail/properity"
+  },
+  {
+    "name": "Patronus třicátý osmý SICAV a.s.",
+    "web": "https://www.amista.cz/"
+  },
+  {
+    "name": "Patronus třicátý sedmý SICAV a.s.",
+    "web": "https://www.amista.cz/"
+  },
+  {
+    "name": "Schönfeld & Co Nemovitosti SICAV, a.s.",
+    "web": "https://arentia.cz/"
+  },
+  {
+    "name": "Spinnaker SICAV, a.s.",
+    "web": "https://www.tillerfunds.cz/en/portfolio/spinnaker-sicav"
+  },
+  {
+    "name": "TOPELEX Partners SICAV, a.s.",
+    "web": "https://www.topelex-partners.cz/"
+  },
+  {
+    "name": "Vista SICAV a.s.",
+    "web": "https://www.avantfunds.cz/informace-o-fondech/"
+  },
+  {
+    "name": "Vitreus Investments SICAV a.s.",
+    "web": "https://nwd.cz/fondy"
+  },
+  {
+    "name": "Wine Heritage Fund SICAV a.s.",
+    "web": "https://wineheritagefund.com/"
+  },
+  {
+    "name": "ČCE (A), investiční fond s proměnným základním kapitálem, a.s.",
+    "web": "https://ustredicce.e-cirkev.cz/investice-pf/investicni-fondy/"
+  },
+  {
+    "name": "ČCE (B), investiční fond s proměnným základním kapitálem, a.s.",
+    "web": "https://ustredicce.e-cirkev.cz/investice-pf/investicni-fondy/"
+  },
+  {
     "name": "Altair SICAV a.s.",
     "web": "https://deltais.cz"
   },
   {
+    "name": "JASMINUM SICAV a.s.",
+    "web": "https://www.jasminumfund.eu/"
+  },
+  {
     "name": "Jet 3 SICAV, a.s.",
     "web": "https://www.jetinvestment.cz/fondy-jet/fond-jet-3/"
+  },
+  {
+    "name": "TTP SICAV a.s.",
+    "web": "https://www.ttpinvest.cz/"
+  },
+  {
+    "name": "Tatra Asset Management SICAV a.s.",
+    "web": null
+  },
+  {
+    "name": "Velaris Fond SICAV a.s.",
+    "web": "https://velarisfund.com/"
+  },
+  {
+    "name": "AGNOS Investment Fund SICAV a.s.",
+    "web": "https://www.tillerfunds.cz/cs/portfolio/agnos-investment-fund-sicav"
   },
   {
     "name": "ALFAMET ENERGY SICAV a.s.",

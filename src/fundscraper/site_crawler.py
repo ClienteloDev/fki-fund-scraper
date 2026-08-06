@@ -9,6 +9,7 @@ from selectolax.lexbor import LexborHTMLParser
 from fundscraper.html_discovery import (
     NEGATIVE_KEYWORDS,
     classify_link,
+    decode_html_bytes,
     is_direct_document_url,
     normalize_search_text,
     resolve_link_url,
@@ -113,7 +114,7 @@ def discover_navigation_links(
     section, fund page, or contains significant tokens from the fund name.
     """
 
-    parser = LexborHTMLParser(body)
+    parser = LexborHTMLParser(decode_html_bytes(body))
 
     significant_tokens = fund_name_tokens(fund_name)
 

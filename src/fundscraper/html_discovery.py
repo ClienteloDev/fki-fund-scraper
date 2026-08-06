@@ -271,7 +271,9 @@ def parse_html_page(
     if not body:
         raise HtmlDiscoveryError("HTML response body is empty")
 
-    parser = LexborHTMLParser(body)
+    # Pages served in a legacy single-byte encoding must be decoded
+    # first, otherwise the parser raises while reading attributes.
+    parser = LexborHTMLParser(decode_html_bytes(body))
 
     title = _extract_title(parser)
     effective_base_url = _extract_base_url(
@@ -564,6 +566,52 @@ def is_direct_document_url(
     extension = PurePosixPath(parsed.path.casefold()).suffix
 
     return extension in DIRECT_DOCUMENT_EXTENSIONS
+
+
+HTML_CHARSET_PATTERN = re.compile(
+    rb"""charset\s*=\s*["']?\s*([a-z0-9_\-]+)""",
+    re.IGNORECASE,
+)
+
+
+HTML_FALLBACK_ENCODINGS = (
+    "utf-8",
+    "cp1250",
+    "iso-8859-2",
+)
+
+
+def decode_html_bytes(
+    body: bytes,
+) -> str:
+    """
+    Decode an HTML page that is not necessarily served as UTF-8.
+
+    Several Czech manager and administrator catalogs are still published
+    in a legacy single-byte encoding. Passing their raw bytes to the HTML
+    parser makes it raise UnicodeDecodeError while reading attributes,
+    which would fail the whole fund.
+    """
+
+    declared_match = HTML_CHARSET_PATTERN.search(body[:4096])
+
+    encodings: list[str] = []
+
+    if declared_match is not None:
+        encodings.append(declared_match.group(1).decode("ascii", errors="ignore").lower())
+
+    encodings.extend(HTML_FALLBACK_ENCODINGS)
+
+    for encoding in encodings:
+        if not encoding:
+            continue
+
+        try:
+            return body.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+
+    return body.decode("utf-8", errors="replace")
 
 
 def normalize_search_text(
