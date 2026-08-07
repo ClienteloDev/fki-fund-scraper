@@ -14,6 +14,13 @@ from fundscraper.document_parser import (
     DocumentParseError,
     load_parsed_document,
 )
+from fundscraper.extended_extraction import (
+    ExtendedFundFields,
+    extract_extended_fields,
+)
+from fundscraper.extended_persistence import (
+    persist_extended_fields,
+)
 from fundscraper.field_extraction import (
     ExtractionDocument,
     extract_fund_fields,
@@ -52,6 +59,18 @@ class ExtractionSummary:
     ]
     warnings: tuple[str, ...]
     output_path: Path
+
+    # The fields added in schema version 3 are reported next to the
+    # delivered ones instead of inside them, so an existing consumer of
+    # this summary keeps reading the same five numbers.
+    extended_statuses: tuple[
+        tuple[
+            str,
+            FieldStatus,
+        ],
+        ...,
+    ] = ()
+    extended_rows: int = 0
 
 
 def extract_fund_data(
@@ -99,6 +118,12 @@ def extract_fund_data(
 
         extracted = extract_fund_fields(
             fund_name=fund.name,
+            documents=documents,
+        )
+
+        extended = extract_extended_fields(
+            fund_name=fund.name,
+            fund_web=fund.web,
             documents=documents,
         )
 
@@ -150,6 +175,12 @@ def extract_fund_data(
                 "target_return": (extracted.target_return),
                 "fees": extracted.fees,
                 "assets_under_management": (extracted.assets_under_management),
+                "manager": extended.manager,
+                "administrator": extended.administrator,
+                "aum_history": extended.aum_history,
+                "annual_returns": extended.annual_returns,
+                "historical_values": (extended.historical_values),
+                "news": extended.news,
                 "processing": ProcessingMetadata(
                     status=processing_status,
                     updated_at=datetime.now(UTC),
@@ -162,6 +193,12 @@ def extract_fund_data(
             output_path,
             outputs,
             overwrite=True,
+        )
+
+        persistence = persist_extended_fields(
+            database_path=database_path,
+            fund_id=fund_id,
+            extended=extended,
         )
     except (
         DatabaseError,
@@ -203,4 +240,45 @@ def extract_fund_data(
         field_statuses=field_statuses,
         warnings=tuple(warnings),
         output_path=output_path,
+        extended_statuses=extended_field_statuses(extended),
+        extended_rows=persistence.total,
+    )
+
+
+def extended_field_statuses(
+    extended: ExtendedFundFields,
+) -> tuple[
+    tuple[
+        str,
+        FieldStatus,
+    ],
+    ...,
+]:
+    """Return the status of every field added in schema version 3."""
+
+    return (
+        (
+            "manager",
+            extended.manager.status,
+        ),
+        (
+            "administrator",
+            extended.administrator.status,
+        ),
+        (
+            "aum_history",
+            extended.aum_history.status,
+        ),
+        (
+            "annual_returns",
+            extended.annual_returns.status,
+        ),
+        (
+            "historical_values",
+            extended.historical_values.status,
+        ),
+        (
+            "news",
+            extended.news.status,
+        ),
     )

@@ -31,14 +31,35 @@ class OutputFileError(ValueError):
     """Raised when an enriched output file cannot be created or validated."""
 
 
-def stable_fund_id(fund: FundInput) -> str:
-    """Create a deterministic identifier from the original fund data."""
+def stable_fund_identifier(
+    *,
+    name: str,
+    web: str | None,
+) -> str:
+    """
+    Create a deterministic identifier from raw fund name and website.
 
-    normalized_key = f"{fund.name.strip()}\n{canonical_url(fund.web)}"
+    The website may be missing because the original input file can
+    contain funds without a known official domain. Those records still
+    need a stable identifier for reporting and later backfilling.
+    """
+
+    normalized_web = canonical_url(web) if web else ""
+
+    normalized_key = f"{name.strip()}\n{normalized_web}"
 
     digest = hashlib.sha256(normalized_key.encode("utf-8")).hexdigest()[:16]
 
     return f"fund_{digest}"
+
+
+def stable_fund_id(fund: FundInput) -> str:
+    """Create a deterministic identifier from the original fund data."""
+
+    return stable_fund_identifier(
+        name=fund.name,
+        web=fund.web,
+    )
 
 
 def create_pending_fund(

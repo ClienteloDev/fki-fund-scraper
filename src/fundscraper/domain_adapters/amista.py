@@ -7,13 +7,20 @@ from difflib import SequenceMatcher
 from selectolax.lexbor import LexborHTMLParser
 
 from fundscraper.domain_adapters.base import DomainAdapterResult
-from fundscraper.html_discovery import normalize_search_text, resolve_link_url
+from fundscraper.html_discovery import (
+    decode_html_bytes,
+    normalize_search_text,
+    resolve_link_url,
+)
 from fundscraper.http_client import FetchError, HttpFetcher
 from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_domain, canonical_url
 
 AMISTA_DOMAIN = "amista.cz"
-AMISTA_CATALOG_URL = "https://www.amista.cz/investovani.html"
+
+# The mandatory information page lists every administered fund together
+# with its documents, including funds that have no own detail page.
+AMISTA_CATALOG_URL = "https://www.amista.cz/povinne-informace.html"
 
 GENERIC_FUND_TOKENS = frozenset(
     {
@@ -124,7 +131,7 @@ def parse_amista_catalog(
     if not body:
         return ()
 
-    parser = LexborHTMLParser(body)
+    parser = LexborHTMLParser(decode_html_bytes(body))
     entries_by_url: dict[str, AmistaCatalogEntry] = {}
 
     for node in parser.css("a[href]"):
@@ -153,11 +160,9 @@ def parse_amista_catalog(
         if any(
             excluded in path
             for excluded in (
-                "povinne-informace",
                 "fondove-sluzby",
                 "kontakty",
                 "kariera",
-                "o-nas",
             )
         ):
             continue

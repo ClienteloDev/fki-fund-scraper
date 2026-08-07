@@ -1,234 +1,166 @@
-# FKI Fund Data
+# Fundscraper
 
-Datová aplikace pro automatické obohacení seznamu českých fondů kvalifikovaných investorů.
+Aplikace získává veřejně dostupné informace o českých fondech kvalifikovaných investorů.
 
-## Požadované údaje
-
-Pro každý fond aplikace zjišťuje:
+Pro každý fond se pokouší dohledat:
 
 - investiční horizont,
 - minimální investici,
 - cílový výnos,
 - poplatky,
-- majetek ve správě.
+- objem majetku pod správou.
 
-Každá nalezená hodnota musí obsahovat dohledatelný zdroj a datum získání.
+Scraper nejdříve prochází oficiální web fondu a jeho dokumenty. Následně může použít adaptéry pro konkrétní správce a administrátory fondů.
 
-## Technologie
+## Požadavky
 
-- Python 3.12
-- uv
-- HTTP a browser scraping
-- HTML a PDF parsing
-- Pydantic validace
-- SQLite pracovní databáze
-- pytest
+Doporučený způsob spuštění používá Docker.
 
-## Stav projektu
+Je potřeba mít nainstalované:
 
-Počáteční implementace.
+- Docker Desktop na Windows,
+- Docker Compose,
+- připojení k internetu.
 
-## CLI příkazy
+Pro Docker spuštění není potřeba lokálně instalovat Python ani projektové knihovny.
 
-Validace vstupního souboru:
+## Vstup
 
-```powershell
-uv run fundscraper validate-input data/input/funds.json
-```
-
-## Pracovní databáze
-
-Průběh zpracování se ukládá do lokální SQLite databáze:
+Vstupní soubor:
 
 ```text
-cache/fundscraper.sqlite3
+data/input/funds.json
 ```
 
-## HTTP stahování
+Každá položka obsahuje název fondu a jeho webovou stránku:
 
-HTTP vrstva používá:
+```json
+[
+  {
+    "name": "Název fondu",
+    "web": "https://example.cz"
+  }
+]
+```
 
-- asynchronní klient,
-- explicitní timeout,
-- omezení počtu souběžných spojení,
-- omezení rychlosti požadavků,
-- retry pro dočasné síťové chyby a vybrané HTTP statusy,
-- maximální povolenou velikost odpovědi,
-- lokální cache podle URL,
-- SHA-256 kontrolu uloženého obsahu.
+## Rychlé spuštění pomocí Dockeru
 
-Stažení startovní stránky jednoho fondu:
+Sestavení image:
 
 ```powershell
-uv run fundscraper fetch-start-page "3M FUND MSI SICAV a.s."
+docker compose build
 ```
 
-## Objevování dokumentů
-
-Startovní HTML stránka fondu se analyzuje pomocí HTML parseru. Relativní odkazy se převádějí na absolutní URL a hodnotí se podle textu odkazu, URL, typu souboru a domény.
-
-Rozpoznávané dokumenty zahrnují:
-
-- PRIIPs KID,
-- statut fondu,
-- statut podfondu,
-- investiční memorandum,
-- výroční zprávu,
-- pololetní zprávu,
-- účetní závěrku,
-- factsheet,
-- infoletter,
-- obecnou sekci dokumentů.
-
-Spuštění pro jeden fond:
+Kontrola CLI:
 
 ```powershell
-uv run fundscraper discover-start-page `
-    "3M FUND MSI SICAV a.s."
+docker compose run --rm fundscraper --help
 ```
 
-## Vícestránkový crawler
-
-Crawler prochází vybrané stránky stejné domény. Stránky vybírá podle:
-
-- názvu fondu,
-- textu odkazu,
-- URL,
-- sekcí pro investory,
-- sekcí dokumentů,
-- typu nalezeného odkazu.
-
-Crawler má omezenou hloubku, maximální počet stránek a maximální počet stahovaných dokumentů.
+Validace vstupu:
 
 ```powershell
-uv run fundscraper crawl-fund `
-    "3M FUND MSI SICAV a.s." `
-    --max-pages 20 `
-    --max-depth 2 `
-    --max-documents 20
+docker compose run --rm fundscraper `
+    validate-input `
+    data/input/funds.json
 ```
 
-## Parsování dokumentů
-
-Stažené zdroje jsou převáděny do jednotného textového formátu.
-
-Podporované formáty:
-
-- PDF,
-- HTML,
-- XHTML,
-- XML,
-- prostý text.
-
-PDF zachovává čísla stran. To umožňuje později uložit přesnou stránku zdroje ke každému extrahovanému údaji.
-
-Dokumenty s velmi malým množstvím extrahovaného textu jsou označeny jako možné skeny. OCR je samostatná záložní fáze.
+Kompletní běh lze spustit připraveným PowerShell skriptem:
 
 ```powershell
-uv run fundscraper parse-fund-documents `
-    "3M FUND MSI SICAV a.s."
+powershell `
+    -NoProfile `
+    -ExecutionPolicy Bypass `
+    -File scripts/run-docker-mvp.ps1
 ```
 
-## Extrakce údajů
-
-Deterministické extraktory zpracovávají normalizovaný text dokumentů a hledají:
-
-- doporučený investiční horizont,
-- minimální investici,
-- cílový nebo očekávaný výnos,
-- vstupní, výstupní, manažerské a výkonnostní poplatky,
-- datovanou hodnotu majetku fondu.
-
-Historická výkonnost se nepoužívá jako náhrada cílového výnosu. Hodnota majetku se uloží pouze tehdy, pokud obsahuje datum, částku a měnu.
+S nastavením paralelního zpracování:
 
 ```powershell
-uv run fundscraper extract-fund `
-    "3M FUND MSI SICAV a.s."
+powershell `
+    -NoProfile `
+    -ExecutionPolicy Bypass `
+    -File scripts/run-docker-mvp.ps1 `
+    -Concurrency 6 `
+    -DocumentConcurrency 4
 ```
 
-## End-to-end pipeline
+## Výstup
 
-Kompletní pipeline jednoho fondu:
+Hlavní výsledný soubor:
+
+```text
+data/output/funds.enriched.json
+```
+
+Reporty:
+
+```text
+reports/
+```
+
+Databáze a cache:
+
+```text
+cache/
+```
+
+Tyto adresáře jsou připojené jako Docker volumes, takže jejich obsah zůstane dostupný i po ukončení kontejneru.
+
+## Validace výstupu
 
 ```powershell
-uv run fundscraper run-fund `
-    "3M FUND MSI SICAV a.s."
+docker compose run --rm fundscraper `
+    validate-output `
+    data/output/funds.enriched.json
 ```
 
-Vzorek deseti fondů:
+## Použité stages
+
+Finální běh se skládá z několika částí:
+
+1. obecné zpracování oficiálních webů a dokumentů,
+2. AVANT fallback,
+3. AMISTA fallback.
+
+Projekt obsahuje také podporu dalších adaptérů.
+
+## Lokální spuštění bez Dockeru
+
+Požadavky:
+
+- Python 3.12,
+- `uv`.
+
+Instalace závislostí:
 
 ```powershell
-uv run fundscraper run-sample `
-    --limit 10 `
-    --fresh-output
+uv sync
 ```
 
-## Fallback plán
-
-Po dokončení sample pipeline lze vytvořit plán dalšího dohledávání:
+Kontrola CLI:
 
 ```powershell
-uv run fundscraper plan-fallbacks `
-    --limit 10
+uv run fundscraper --help
 ```
 
-## Doménové adaptéry
-
-Doménové adaptéry doplňují obecný crawler pro weby, na kterých je více fondů spravováno přes jeden centrální portál.
-
-První adaptér podporuje doménu `avantfunds.cz`. Vyhledá přesnou sekci fondu v centrálním katalogu a předá crawleru:
-
-- stránku konkrétního fondu,
-- PRIIPs KID,
-- výroční zprávy,
-- účetní závěrky,
-- statuty,
-- další relevantní fund-level dokumenty.
-
-Diagnostika adaptéru:
+Spuštění finálního běhu:
 
 ```powershell
-uv run fundscraper inspect-adapter `
-    "AVANT Finance SICAV a. s."
+powershell `
+    -NoProfile `
+    -ExecutionPolicy Bypass `
+    -File scripts/run-mvp-final.ps1 `
+    -Concurrency 6 `
+    -DocumentConcurrency 4
 ```
 
-## Kontrola scope a konfliktů
-
-Extrakce nerozhoduje pouze podle první nalezené hodnoty.
-
-Před uložením se kontroluje:
-
-- zda hodnota patří konkrétnímu fondu,
-- zda text nepopisuje správce nebo celou skupinu,
-- zda dva podobně důvěryhodné zdroje neobsahují různé hodnoty,
-- zda AUM obsahuje datum a zda je vybrána aktuálnější hodnota.
-
-Možné výsledky:
-
-- `found`,
-- `not_found`,
-- `ambiguous`,
-- `conflicting`,
-- `error`.
-
-Hodnota správce nebo skupiny se nesmí automaticky použít jako hodnota konkrétního fondu.
-
-## Grounded textové balíčky
-
-Pro pole ve stavu `not_found`, `ambiguous`, `conflicting` nebo `error` lze vytvořit omezený balíček relevantních úseků již stažených dokumentů.
+## Testy a kontrola kódu
 
 ```powershell
-uv run fundscraper build-grounding-packets `
-    --limit 10 `
-    --max-snippets 8
+uv run pytest
+uv run mypy
+uv run ruff check .
 ```
 
-## Grounded rozhodnutí
-
-Grounding packet může zpracovat ruční kontrola nebo libovolný externí provider. Provider vrací pouze validovaný JSON soubor.
-
-```powershell
-uv run fundscraper apply-grounded-decisions `
-    --packets reports/grounding-packets.json `
-    --decisions reports/grounded-decisions.json
-```
+Automatické testy ověřují databázi, vstupní modely, HTTP klienta, discovery, crawler, PDF parser, extrakci, adaptéry, CLI a výstupní validaci.

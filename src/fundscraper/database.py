@@ -6,13 +6,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_url
 from fundscraper.output_service import stable_fund_id
 
-SCHEMA_VERSION: Final = 2
+SCHEMA_VERSION: Final = 3
 
 
 class FundStatus(StrEnum):
@@ -182,6 +182,146 @@ ON parsed_documents(fund_id);
 
 CREATE INDEX IF NOT EXISTS idx_parsed_documents_scanned
 ON parsed_documents(scanned_candidate);
+
+-- Schema version 3 adds the extended result tables. They are additive,
+-- so a database created by an earlier version is upgraded by creating
+-- them; no existing table or column changes.
+
+CREATE TABLE IF NOT EXISTS fund_parties (
+    fund_id TEXT NOT NULL,
+    role TEXT NOT NULL
+        CHECK (
+            role IN (
+                'manager',
+                'administrator',
+                'depositary',
+                'auditor'
+            )
+        ),
+    name TEXT NOT NULL,
+    legal_name TEXT,
+    ico TEXT
+        CHECK (
+            ico IS NULL
+            OR length(ico) = 8
+        ),
+    web TEXT,
+    source_url TEXT,
+    retrieved_at TEXT,
+    confidence TEXT,
+    review_required INTEGER NOT NULL DEFAULT 0
+        CHECK (review_required IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (fund_id, role),
+    FOREIGN KEY (fund_id)
+        REFERENCES funds(fund_id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS capital_observations (
+    observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fund_id TEXT NOT NULL,
+    metric_type TEXT NOT NULL,
+    amount REAL NOT NULL
+        CHECK (amount >= 0),
+    currency TEXT NOT NULL
+        CHECK (length(currency) = 3),
+    as_of TEXT NOT NULL,
+    -- Part of the uniqueness key. SQLite treats NULL values as distinct,
+    -- so the absence of a share class is stored as an empty string.
+    share_class TEXT NOT NULL DEFAULT '',
+    scope_type TEXT,
+    source_url TEXT,
+    quote TEXT,
+    page INTEGER,
+    confidence TEXT,
+    review_required INTEGER NOT NULL DEFAULT 0
+        CHECK (review_required IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (fund_id)
+        REFERENCES funds(fund_id)
+        ON DELETE CASCADE,
+    UNIQUE (fund_id, metric_type, as_of, share_class, currency)
+);
+
+CREATE INDEX IF NOT EXISTS idx_capital_observations_fund
+ON capital_observations(fund_id, metric_type, as_of);
+
+CREATE TABLE IF NOT EXISTS annual_returns (
+    return_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fund_id TEXT NOT NULL,
+    year INTEGER NOT NULL
+        CHECK (year BETWEEN 1900 AND 2100),
+    series_type TEXT NOT NULL,
+    return_percent REAL NOT NULL,
+    share_class TEXT NOT NULL DEFAULT '',
+    currency TEXT NOT NULL DEFAULT ''
+        CHECK (
+            currency = ''
+            OR length(currency) = 3
+        ),
+    source_url TEXT,
+    quote TEXT,
+    page INTEGER,
+    confidence TEXT,
+    review_required INTEGER NOT NULL DEFAULT 0
+        CHECK (review_required IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (fund_id)
+        REFERENCES funds(fund_id)
+        ON DELETE CASCADE,
+    UNIQUE (fund_id, year, series_type, share_class, currency)
+);
+
+CREATE INDEX IF NOT EXISTS idx_annual_returns_fund
+ON annual_returns(fund_id, year);
+
+CREATE TABLE IF NOT EXISTS historical_values (
+    value_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fund_id TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    value_type TEXT NOT NULL,
+    value REAL NOT NULL,
+    currency TEXT NOT NULL
+        CHECK (length(currency) = 3),
+    share_class TEXT NOT NULL DEFAULT '',
+    unit TEXT,
+    frequency TEXT NOT NULL,
+    source_url TEXT,
+    quote TEXT,
+    page INTEGER,
+    confidence TEXT,
+    review_required INTEGER NOT NULL DEFAULT 0
+        CHECK (review_required IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (fund_id)
+        REFERENCES funds(fund_id)
+        ON DELETE CASCADE,
+    UNIQUE (fund_id, as_of, value_type, share_class, currency)
+);
+
+CREATE INDEX IF NOT EXISTS idx_historical_values_series
+ON historical_values(fund_id, value_type, share_class, as_of);
+
+CREATE TABLE IF NOT EXISTS fund_news (
+    news_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fund_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    title TEXT NOT NULL,
+    published_at TEXT,
+    summary TEXT,
+    source_domain TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    relation_confidence TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (fund_id)
+        REFERENCES funds(fund_id)
+        ON DELETE CASCADE,
+    UNIQUE (fund_id, url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fund_news_fund
+ON fund_news(fund_id, published_at);
 """
 
 
@@ -216,6 +356,11 @@ class ParsedDocumentRecord:
     scanned_candidate: bool
     text_path: str
     parsed_at: str
+
+    # Where the downloaded body of the source is stored. News items are
+    # read from the original HTML, because the plain text of a listing
+    # page keeps the headlines but loses the link of every article.
+    local_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -765,7 +910,8 @@ def list_parsed_documents(
                     parsed.character_count,
                     parsed.scanned_candidate,
                     parsed.text_path,
-                    parsed.parsed_at
+                    parsed.parsed_at,
+                    sources.local_path
                 FROM parsed_documents AS parsed
                 INNER JOIN sources
                     ON sources.source_id = parsed.source_id
@@ -793,6 +939,7 @@ def list_parsed_documents(
             scanned_candidate=bool(row[11]),
             text_path=str(row[12]),
             parsed_at=str(row[13]),
+            local_path=(str(row[14]) if row[14] is not None else None),
         )
         for row in rows
     ]
@@ -1017,3 +1164,560 @@ def _count_rows(
         raise DatabaseError("Database count result is not an integer")
 
     return value
+
+
+@dataclass(frozen=True, slots=True)
+class FundPartyRecord:
+    fund_id: str
+    role: str
+    name: str
+    legal_name: str | None
+    ico: str | None
+    web: str | None
+    source_url: str | None
+    retrieved_at: str | None
+    confidence: str | None
+    review_required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CapitalObservationRecord:
+    fund_id: str
+    metric_type: str
+    amount: float
+    currency: str
+    as_of: str
+    share_class: str | None
+    scope_type: str | None
+    source_url: str | None
+    quote: str | None
+    page: int | None
+    confidence: str | None
+    review_required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AnnualReturnRecord:
+    fund_id: str
+    year: int
+    series_type: str
+    return_percent: float
+    share_class: str | None
+    currency: str | None
+    source_url: str | None
+    quote: str | None
+    page: int | None
+    confidence: str | None
+    review_required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalValueRecord:
+    fund_id: str
+    as_of: str
+    value_type: str
+    value: float
+    currency: str
+    share_class: str | None
+    unit: str | None
+    frequency: str
+    source_url: str | None
+    quote: str | None
+    page: int | None
+    confidence: str | None
+    review_required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FundNewsRecord:
+    fund_id: str
+    url: str
+    title: str
+    published_at: str | None
+    summary: str | None
+    source_domain: str
+    source_type: str
+    relation_confidence: str
+
+
+def upsert_fund_party(
+    path: Path,
+    record: FundPartyRecord,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Store the manager or administrator acting for one fund."""
+
+    _execute_write(
+        path,
+        statement="""
+            INSERT INTO fund_parties (
+                fund_id, role, name, legal_name, ico, web,
+                source_url, retrieved_at, confidence, review_required, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (fund_id, role) DO UPDATE SET
+                name = excluded.name,
+                legal_name = excluded.legal_name,
+                ico = excluded.ico,
+                web = excluded.web,
+                source_url = excluded.source_url,
+                retrieved_at = excluded.retrieved_at,
+                confidence = excluded.confidence,
+                review_required = excluded.review_required,
+                updated_at = excluded.updated_at
+            """,
+        parameters=(
+            record.fund_id,
+            record.role,
+            record.name,
+            record.legal_name,
+            record.ico,
+            record.web,
+            record.source_url,
+            record.retrieved_at,
+            record.confidence,
+            int(record.review_required),
+            utc_now_iso(now),
+        ),
+        description="fund party",
+    )
+
+
+def list_fund_parties(
+    path: Path,
+    *,
+    fund_id: str,
+) -> list[FundPartyRecord]:
+    """Return the companies acting for one fund."""
+
+    return [
+        FundPartyRecord(
+            fund_id=str(row[0]),
+            role=str(row[1]),
+            name=str(row[2]),
+            legal_name=_optional_text(row[3]),
+            ico=_optional_text(row[4]),
+            web=_optional_text(row[5]),
+            source_url=_optional_text(row[6]),
+            retrieved_at=_optional_text(row[7]),
+            confidence=_optional_text(row[8]),
+            review_required=bool(row[9]),
+        )
+        for row in _select_rows(
+            path,
+            statement="""
+                SELECT fund_id, role, name, legal_name, ico, web,
+                       source_url, retrieved_at, confidence, review_required
+                FROM fund_parties
+                WHERE fund_id = ?
+                ORDER BY role
+                """,
+            parameters=(fund_id,),
+            description="fund parties",
+        )
+    ]
+
+
+def record_capital_observation(
+    path: Path,
+    record: CapitalObservationRecord,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Store one dated capital figure of a fund."""
+
+    _execute_write(
+        path,
+        statement="""
+            INSERT INTO capital_observations (
+                fund_id, metric_type, amount, currency, as_of, share_class,
+                scope_type, source_url, quote, page, confidence,
+                review_required, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (fund_id, metric_type, as_of, share_class, currency)
+            DO UPDATE SET
+                amount = excluded.amount,
+                scope_type = excluded.scope_type,
+                source_url = excluded.source_url,
+                quote = excluded.quote,
+                page = excluded.page,
+                confidence = excluded.confidence,
+                review_required = excluded.review_required,
+                updated_at = excluded.updated_at
+            """,
+        parameters=(
+            record.fund_id,
+            record.metric_type,
+            record.amount,
+            record.currency,
+            record.as_of,
+            _key_text(record.share_class),
+            record.scope_type,
+            record.source_url,
+            record.quote,
+            record.page,
+            record.confidence,
+            int(record.review_required),
+            utc_now_iso(now),
+        ),
+        description="capital observation",
+    )
+
+
+def list_capital_observations(
+    path: Path,
+    *,
+    fund_id: str,
+    metric_type: str | None = None,
+) -> list[CapitalObservationRecord]:
+    """Return the capital figures stored for one fund, oldest first."""
+
+    statement = """
+        SELECT fund_id, metric_type, amount, currency, as_of, share_class,
+               scope_type, source_url, quote, page, confidence, review_required
+        FROM capital_observations
+        WHERE fund_id = ?
+        """
+
+    parameters: tuple[object, ...] = (fund_id,)
+
+    if metric_type is not None:
+        statement += " AND metric_type = ?"
+
+        parameters = (
+            fund_id,
+            metric_type,
+        )
+
+    statement += " ORDER BY as_of, metric_type"
+
+    return [
+        CapitalObservationRecord(
+            fund_id=str(row[0]),
+            metric_type=str(row[1]),
+            amount=float(row[2]),
+            currency=str(row[3]),
+            as_of=str(row[4]),
+            share_class=_optional_key(row[5]),
+            scope_type=_optional_text(row[6]),
+            source_url=_optional_text(row[7]),
+            quote=_optional_text(row[8]),
+            page=int(row[9]) if row[9] is not None else None,
+            confidence=_optional_text(row[10]),
+            review_required=bool(row[11]),
+        )
+        for row in _select_rows(
+            path,
+            statement=statement,
+            parameters=parameters,
+            description="capital observations",
+        )
+    ]
+
+
+def record_annual_return(
+    path: Path,
+    record: AnnualReturnRecord,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Store the performance of one fund in one period."""
+
+    _execute_write(
+        path,
+        statement="""
+            INSERT INTO annual_returns (
+                fund_id, year, series_type, return_percent, share_class, currency,
+                source_url, quote, page, confidence, review_required, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (fund_id, year, series_type, share_class, currency)
+            DO UPDATE SET
+                return_percent = excluded.return_percent,
+                source_url = excluded.source_url,
+                quote = excluded.quote,
+                page = excluded.page,
+                confidence = excluded.confidence,
+                review_required = excluded.review_required,
+                updated_at = excluded.updated_at
+            """,
+        parameters=(
+            record.fund_id,
+            record.year,
+            record.series_type,
+            record.return_percent,
+            _key_text(record.share_class),
+            _key_text(record.currency),
+            record.source_url,
+            record.quote,
+            record.page,
+            record.confidence,
+            int(record.review_required),
+            utc_now_iso(now),
+        ),
+        description="annual return",
+    )
+
+
+def list_annual_returns(
+    path: Path,
+    *,
+    fund_id: str,
+) -> list[AnnualReturnRecord]:
+    """Return the reported performance of one fund, oldest year first."""
+
+    return [
+        AnnualReturnRecord(
+            fund_id=str(row[0]),
+            year=int(row[1]),
+            series_type=str(row[2]),
+            return_percent=float(row[3]),
+            share_class=_optional_key(row[4]),
+            currency=_optional_key(row[5]),
+            source_url=_optional_text(row[6]),
+            quote=_optional_text(row[7]),
+            page=int(row[8]) if row[8] is not None else None,
+            confidence=_optional_text(row[9]),
+            review_required=bool(row[10]),
+        )
+        for row in _select_rows(
+            path,
+            statement="""
+                SELECT fund_id, year, series_type, return_percent, share_class,
+                       currency, source_url, quote, page, confidence, review_required
+                FROM annual_returns
+                WHERE fund_id = ?
+                ORDER BY year, series_type
+                """,
+            parameters=(fund_id,),
+            description="annual returns",
+        )
+    ]
+
+
+def record_historical_value(
+    path: Path,
+    record: HistoricalValueRecord,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Store one dated point of a fund value series."""
+
+    _execute_write(
+        path,
+        statement="""
+            INSERT INTO historical_values (
+                fund_id, as_of, value_type, value, currency, share_class, unit,
+                frequency, source_url, quote, page, confidence,
+                review_required, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (fund_id, as_of, value_type, share_class, currency)
+            DO UPDATE SET
+                value = excluded.value,
+                unit = excluded.unit,
+                frequency = excluded.frequency,
+                source_url = excluded.source_url,
+                quote = excluded.quote,
+                page = excluded.page,
+                confidence = excluded.confidence,
+                review_required = excluded.review_required,
+                updated_at = excluded.updated_at
+            """,
+        parameters=(
+            record.fund_id,
+            record.as_of,
+            record.value_type,
+            record.value,
+            record.currency,
+            _key_text(record.share_class),
+            record.unit,
+            record.frequency,
+            record.source_url,
+            record.quote,
+            record.page,
+            record.confidence,
+            int(record.review_required),
+            utc_now_iso(now),
+        ),
+        description="historical value",
+    )
+
+
+def list_historical_values(
+    path: Path,
+    *,
+    fund_id: str,
+) -> list[HistoricalValueRecord]:
+    """Return the value series points stored for one fund."""
+
+    return [
+        HistoricalValueRecord(
+            fund_id=str(row[0]),
+            as_of=str(row[1]),
+            value_type=str(row[2]),
+            value=float(row[3]),
+            currency=str(row[4]),
+            share_class=_optional_key(row[5]),
+            unit=_optional_text(row[6]),
+            frequency=str(row[7]),
+            source_url=_optional_text(row[8]),
+            quote=_optional_text(row[9]),
+            page=int(row[10]) if row[10] is not None else None,
+            confidence=_optional_text(row[11]),
+            review_required=bool(row[12]),
+        )
+        for row in _select_rows(
+            path,
+            statement="""
+                SELECT fund_id, as_of, value_type, value, currency, share_class,
+                       unit, frequency, source_url, quote, page, confidence,
+                       review_required
+                FROM historical_values
+                WHERE fund_id = ?
+                ORDER BY value_type, share_class, as_of
+                """,
+            parameters=(fund_id,),
+            description="historical values",
+        )
+    ]
+
+
+def record_fund_news(
+    path: Path,
+    record: FundNewsRecord,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Store one news item related to a fund."""
+
+    _execute_write(
+        path,
+        statement="""
+            INSERT INTO fund_news (
+                fund_id, url, title, published_at, summary, source_domain,
+                source_type, relation_confidence, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (fund_id, url) DO UPDATE SET
+                title = excluded.title,
+                published_at = excluded.published_at,
+                summary = excluded.summary,
+                source_domain = excluded.source_domain,
+                source_type = excluded.source_type,
+                relation_confidence = excluded.relation_confidence,
+                updated_at = excluded.updated_at
+            """,
+        parameters=(
+            record.fund_id,
+            record.url,
+            record.title,
+            record.published_at,
+            record.summary,
+            record.source_domain,
+            record.source_type,
+            record.relation_confidence,
+            utc_now_iso(now),
+        ),
+        description="fund news",
+    )
+
+
+def list_fund_news(
+    path: Path,
+    *,
+    fund_id: str,
+) -> list[FundNewsRecord]:
+    """Return the news items stored for one fund, newest first."""
+
+    return [
+        FundNewsRecord(
+            fund_id=str(row[0]),
+            url=str(row[1]),
+            title=str(row[2]),
+            published_at=_optional_text(row[3]),
+            summary=_optional_text(row[4]),
+            source_domain=str(row[5]),
+            source_type=str(row[6]),
+            relation_confidence=str(row[7]),
+        )
+        for row in _select_rows(
+            path,
+            statement="""
+                SELECT fund_id, url, title, published_at, summary,
+                       source_domain, source_type, relation_confidence
+                FROM fund_news
+                WHERE fund_id = ?
+                ORDER BY published_at DESC, title
+                """,
+            parameters=(fund_id,),
+            description="fund news",
+        )
+    ]
+
+
+def _execute_write(
+    path: Path,
+    *,
+    statement: str,
+    parameters: tuple[object, ...],
+    description: str,
+) -> None:
+    try:
+        with closing(connect_database(path)) as connection, connection:
+            _ensure_initialized(
+                connection,
+                path,
+            )
+
+            connection.execute(
+                statement,
+                parameters,
+            )
+    except sqlite3.Error as exc:
+        raise DatabaseError(f"Could not store {description} in {path}: {exc}") from exc
+
+
+def _select_rows(
+    path: Path,
+    *,
+    statement: str,
+    parameters: tuple[object, ...],
+    description: str,
+) -> list[tuple[Any, ...]]:
+    try:
+        with closing(connect_database(path)) as connection:
+            _ensure_initialized(
+                connection,
+                path,
+            )
+
+            return [tuple(row) for row in connection.execute(statement, parameters).fetchall()]
+    except sqlite3.Error as exc:
+        raise DatabaseError(f"Could not read {description} from {path}: {exc}") from exc
+
+
+def _optional_text(
+    value: object,
+) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _key_text(
+    value: str | None,
+) -> str:
+    """Return a uniqueness key component that is never NULL."""
+
+    return value if value is not None else ""
+
+
+def _optional_key(
+    value: object,
+) -> str | None:
+    """Return a uniqueness key component as the absent value it means."""
+
+    text = str(value) if value is not None else ""
+
+    return text or None

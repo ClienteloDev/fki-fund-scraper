@@ -81,6 +81,15 @@ class FundPipelineResult:
 
     duration_seconds: float
 
+    # Reported next to the delivered fields, never inside them, so an
+    # existing reader of this summary is unaffected by the new ones.
+    extended_statuses: tuple[
+        tuple[str, str],
+        ...,
+    ] = ()
+
+    extended_rows: int = 0
+
 
 @dataclass(frozen=True, slots=True)
 class BatchPipelineSummary:
@@ -405,6 +414,14 @@ async def run_fund_pipeline(
                 )
                 for field_name, status in extraction_result.field_statuses
             ),
+            extended_statuses=tuple(
+                (
+                    field_name,
+                    status.value,
+                )
+                for field_name, status in extraction_result.extended_statuses
+            ),
+            extended_rows=extraction_result.extended_rows,
             failures=tuple(failures),
             duration_seconds=round(
                 perf_counter() - started,

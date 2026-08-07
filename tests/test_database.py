@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from fundscraper.database import (
+    SCHEMA_VERSION,
     AttemptStatus,
     DatabaseError,
     FundStatus,
@@ -66,7 +67,7 @@ def test_initialize_register_and_validate_database(
     validate_database(database_path)
 
     assert registered_count == 2
-    assert status.schema_version == 2
+    assert status.schema_version == SCHEMA_VERSION
     assert status.funds_total == 2
     assert status.funds_pending == 2
     assert status.sources_total == 0
