@@ -919,7 +919,7 @@ def extract_fund_command(
         ),
     ] = Path("data/output/funds.enriched.json"),
 ) -> None:
-    """Extract five supported fields for one parsed fund."""
+    """Extract the delivered and the extended fields of one parsed fund."""
 
     summary: ExtractionSummary
 
@@ -974,6 +974,14 @@ def extract_fund_command(
 
     for field_name, status in summary.field_statuses:
         typer.echo(f"- {field_name}: {status.value}")
+
+    if summary.extended_statuses:
+        typer.echo("Extended fields (schema version 3):")
+
+        for field_name, status in summary.extended_statuses:
+            typer.echo(f"- {field_name}: {status.value}")
+
+        typer.echo(f"Extended rows stored: {summary.extended_rows}")
 
     typer.echo(f"Warnings: {len(summary.warnings)}")
     typer.echo(f"Output file: {summary.output_path}")
@@ -1153,6 +1161,14 @@ def run_fund_command(
 
     for field_name, status in result.field_statuses:
         typer.echo(f"- {field_name}: {status}")
+
+    if result.extended_statuses:
+        typer.echo("Extended fields (schema version 3):")
+
+        for field_name, status in result.extended_statuses:
+            typer.echo(f"- {field_name}: {status}")
+
+        typer.echo(f"Extended rows stored: {result.extended_rows}")
 
     typer.echo(f"Failures: {len(result.failures)}")
 

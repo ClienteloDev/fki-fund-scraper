@@ -105,7 +105,78 @@ def test_rejects_unknown_fields(tmp_path: Path) -> None:
         load_funds(input_path)
 
 
-def test_project_input_contains_230_funds() -> None:
-    funds = load_funds(Path("data/input/funds.json"))
+PROJECT_INPUT_PATH = Path("data/input/funds.json")
 
-    assert len(funds) == 230
+
+def read_project_input() -> list[dict[str, object]]:
+    payload = json.loads(PROJECT_INPUT_PATH.read_text(encoding="utf-8-sig"))
+
+    assert isinstance(payload, list)
+
+    return payload
+
+
+def test_project_input_has_the_expected_record_structure() -> None:
+    """
+    The fund list grows as new funds are added, so the number of records
+    is not asserted. Every record must carry exactly a name and a website,
+    where the website is either a valid HTTP address or still unknown.
+    """
+
+    records = read_project_input()
+
+    assert records
+
+    for index, record in enumerate(records):
+        assert isinstance(record, dict), index
+
+        assert set(record) == {"name", "web"}, index
+
+        name = record["name"]
+
+        assert isinstance(name, str) and name.strip(), index
+
+        web = record["web"]
+
+        assert web is None or isinstance(web, str), index
+
+        if isinstance(web, str) and web:
+            assert web.startswith(("http://", "https://")), index
+
+
+def test_project_input_names_are_unique() -> None:
+    records = read_project_input()
+
+    names = [str(record["name"]).strip() for record in records]
+
+    assert len(names) == len(set(names))
+
+
+def test_project_funds_with_a_website_load_and_keep_their_order(
+    tmp_path: Path,
+) -> None:
+    """
+    The strict input model requires a website, so records still awaiting
+    a domain are excluded. Everything else must load unchanged.
+    """
+
+    records = read_project_input()
+
+    with_website = [record for record in records if record["web"]]
+
+    assert with_website
+
+    input_path = tmp_path / "funds.json"
+
+    write_json(
+        input_path,
+        with_website,
+    )
+
+    funds = load_funds(input_path)
+
+    assert len(funds) == len(with_website)
+
+    assert [fund.name for fund in funds] == [str(record["name"]).strip() for record in with_website]
+
+    assert [fund.web for fund in funds] == [str(record["web"]) for record in with_website]
