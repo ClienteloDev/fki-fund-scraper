@@ -27,6 +27,12 @@ async def fetch_fund_start_page(
 ) -> FetchResult:
     """Fetch and record the original website of one fund."""
 
+    if not fund.web:
+        raise FetchError(
+            "The fund has no known website to fetch",
+            url="",
+        )
+
     fund_id = stable_fund_id(fund)
 
     record_attempt(
@@ -34,7 +40,7 @@ async def fetch_fund_start_page(
         fund_id=fund_id,
         stage="fetch_start_page",
         status=AttemptStatus.STARTED,
-        url=fund.web,
+        url=fund.web or "",
     )
 
     try:

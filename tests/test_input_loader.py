@@ -180,3 +180,75 @@ def test_project_funds_with_a_website_load_and_keep_their_order(
     assert [fund.name for fund in funds] == [str(record["name"]).strip() for record in with_website]
 
     assert [fund.web for fund in funds] == [str(record["web"]) for record in with_website]
+
+
+def test_a_fund_without_a_website_loads(
+    tmp_path: Path,
+) -> None:
+    """One fund with no known site must not reject the whole dataset."""
+
+    path = tmp_path / "funds.json"
+
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "Rezidento Alfa SICAV, a.s.",
+                    "web": "https://www.rezidentoalfa.cz",
+                },
+                {
+                    "name": "FestLen SICAV a.s.",
+                    "web": None,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    funds = load_funds(path)
+
+    assert len(funds) == 2
+
+    assert funds[0].has_website
+
+    assert not funds[1].has_website
+
+    assert funds[1].web is None
+
+
+def test_a_malformed_website_is_still_rejected(
+    tmp_path: Path,
+) -> None:
+    """Allowing an absent site must not allow an invalid one."""
+
+    path = tmp_path / "funds.json"
+
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "Rezidento Alfa SICAV, a.s.",
+                    "web": "ftp://www.rezidentoalfa.cz",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(InputFileError):
+        load_funds(path)
+
+
+def test_the_canonical_dataset_loads_and_is_counted_dynamically() -> None:
+    """The count comes from the file, never from a constant."""
+
+    canonical = Path("data/input/funds.json")
+
+    if not canonical.exists():
+        pytest.skip("canonical dataset is not present")
+
+    funds = load_funds(canonical)
+
+    assert funds
+
+    assert len(funds) == len({fund.name for fund in funds})

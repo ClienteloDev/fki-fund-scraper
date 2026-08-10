@@ -12,7 +12,7 @@ from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_url
 from fundscraper.output_service import stable_fund_id
 
-SCHEMA_VERSION: Final = 3
+SCHEMA_VERSION: Final = 5
 
 
 class FundStatus(StrEnum):
@@ -322,6 +322,80 @@ CREATE TABLE IF NOT EXISTS fund_news (
 
 CREATE INDEX IF NOT EXISTS idx_fund_news_fund
 ON fund_news(fund_id, published_at);
+
+-- Schema version 4 records what discovery saw. Every page and document
+-- is written here whether it was accepted or refused, so a fund with a
+-- missing document can be explained without crawling it again. The table
+-- is additive, so a version 3 database is upgraded by creating it.
+
+CREATE TABLE IF NOT EXISTS discovery_log (
+    entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fund_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    discovered_from TEXT,
+    method TEXT NOT NULL,
+    priority_score INTEGER NOT NULL DEFAULT 0,
+    document_type TEXT,
+    title TEXT,
+    scope_decision TEXT,
+    accepted INTEGER NOT NULL DEFAULT 0
+        CHECK (accepted IN (0, 1)),
+    rejection_reason TEXT,
+    is_document INTEGER NOT NULL DEFAULT 0
+        CHECK (is_document IN (0, 1)),
+    run_id TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (fund_id)
+        REFERENCES funds(fund_id)
+        ON DELETE CASCADE,
+    UNIQUE (fund_id, run_id, url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_discovery_log_fund
+ON discovery_log(fund_id, accepted, priority_score);
+
+-- Schema version 5 records what was learned about each parsed document
+-- before any value was read out of it: what kind of document it is, which
+-- entity it describes, the dates it carries and how it was parsed. The
+-- table is additive, so a version 4 database is upgraded by creating it.
+
+CREATE TABLE IF NOT EXISTS document_metadata (
+    source_id INTEGER PRIMARY KEY,
+    fund_id TEXT NOT NULL,
+    document_type TEXT,
+    type_score INTEGER NOT NULL DEFAULT 0,
+    type_ambiguous INTEGER NOT NULL DEFAULT 0
+        CHECK (type_ambiguous IN (0, 1)),
+    type_evidence TEXT,
+    scope TEXT,
+    scope_confidence TEXT,
+    scope_accepted INTEGER NOT NULL DEFAULT 0
+        CHECK (scope_accepted IN (0, 1)),
+    scope_rejection_reason TEXT,
+    identity_evidence TEXT,
+    subfund_name TEXT,
+    share_class TEXT,
+    matched_ico TEXT,
+    matched_isin TEXT,
+    published_at TEXT,
+    published_at_origin TEXT,
+    effective_at TEXT,
+    reporting_period_start TEXT,
+    reporting_period_end TEXT,
+    as_of TEXT,
+    parser_name TEXT,
+    ocr_used INTEGER NOT NULL DEFAULT 0
+        CHECK (ocr_used IN (0, 1)),
+    pages_parsed INTEGER NOT NULL DEFAULT 0,
+    parse_warnings TEXT,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (fund_id)
+        REFERENCES funds(fund_id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_metadata_fund
+ON document_metadata(fund_id, document_type, scope);
 """
 
 
@@ -480,8 +554,12 @@ def register_funds(
         (
             stable_fund_id(fund),
             fund.name,
-            fund.web,
-            canonical_url(fund.web),
+            # The column has always been NOT NULL and rebuilding the
+            # table to change that would put every existing row at risk.
+            # A fund whose website is unknown is stored with an empty
+            # one, which is falsy everywhere the value is read.
+            fund.web or "",
+            canonical_url(fund.web) if fund.web else "",
             "pending",
             timestamp,
             timestamp,
@@ -1654,6 +1732,290 @@ def list_fund_news(
                 """,
             parameters=(fund_id,),
             description="fund news",
+        )
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryLogRecord:
+    """One page or document discovery saw, accepted or refused."""
+
+    fund_id: str
+    url: str
+    method: str
+    discovered_from: str | None = None
+    priority_score: int = 0
+    document_type: str | None = None
+    title: str | None = None
+    scope_decision: str | None = None
+    accepted: bool = False
+    rejection_reason: str | None = None
+    is_document: bool = False
+    run_id: str = ""
+
+
+def record_discovery_entry(
+    path: Path,
+    record: DiscoveryLogRecord,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Store what discovery decided about one URL."""
+
+    _execute_write(
+        path,
+        statement="""
+            INSERT INTO discovery_log (
+                fund_id, url, discovered_from, method, priority_score,
+                document_type, title, scope_decision, accepted,
+                rejection_reason, is_document, run_id, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (fund_id, run_id, url) DO UPDATE SET
+                discovered_from = excluded.discovered_from,
+                method = excluded.method,
+                priority_score = excluded.priority_score,
+                document_type = excluded.document_type,
+                title = excluded.title,
+                scope_decision = excluded.scope_decision,
+                accepted = excluded.accepted,
+                rejection_reason = excluded.rejection_reason,
+                is_document = excluded.is_document,
+                updated_at = excluded.updated_at
+            """,
+        parameters=(
+            record.fund_id,
+            record.url,
+            record.discovered_from,
+            record.method,
+            record.priority_score,
+            record.document_type,
+            record.title,
+            record.scope_decision,
+            int(record.accepted),
+            record.rejection_reason,
+            int(record.is_document),
+            record.run_id,
+            utc_now_iso(now),
+        ),
+        description="discovery log entry",
+    )
+
+
+def list_discovery_entries(
+    path: Path,
+    *,
+    fund_id: str,
+    run_id: str | None = None,
+) -> list[DiscoveryLogRecord]:
+    """Return what discovery recorded for one fund."""
+
+    statement = """
+        SELECT fund_id, url, discovered_from, method, priority_score,
+               document_type, title, scope_decision, accepted,
+               rejection_reason, is_document, run_id
+        FROM discovery_log
+        WHERE fund_id = ?
+        """
+
+    parameters: tuple[object, ...] = (fund_id,)
+
+    if run_id is not None:
+        statement += " AND run_id = ?"
+
+        parameters = (
+            fund_id,
+            run_id,
+        )
+
+    statement += " ORDER BY priority_score DESC, url"
+
+    return [
+        DiscoveryLogRecord(
+            fund_id=str(row[0]),
+            url=str(row[1]),
+            discovered_from=_optional_text(row[2]),
+            method=str(row[3]),
+            priority_score=int(row[4]),
+            document_type=_optional_text(row[5]),
+            title=_optional_text(row[6]),
+            scope_decision=_optional_text(row[7]),
+            accepted=bool(row[8]),
+            rejection_reason=_optional_text(row[9]),
+            is_document=bool(row[10]),
+            run_id=str(row[11]),
+        )
+        for row in _select_rows(
+            path,
+            statement=statement,
+            parameters=parameters,
+            description="discovery log entries",
+        )
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentMetadataRecord:
+    """What was learned about one parsed document before extraction."""
+
+    source_id: int
+    fund_id: str
+    document_type: str | None = None
+    type_score: int = 0
+    type_ambiguous: bool = False
+    type_evidence: str | None = None
+    scope: str | None = None
+    scope_confidence: str | None = None
+    scope_accepted: bool = False
+    scope_rejection_reason: str | None = None
+    identity_evidence: str | None = None
+    subfund_name: str | None = None
+    share_class: str | None = None
+    matched_ico: str | None = None
+    matched_isin: str | None = None
+    published_at: str | None = None
+    published_at_origin: str | None = None
+    effective_at: str | None = None
+    reporting_period_start: str | None = None
+    reporting_period_end: str | None = None
+    as_of: str | None = None
+    parser_name: str | None = None
+    ocr_used: bool = False
+    pages_parsed: int = 0
+    parse_warnings: str | None = None
+
+
+DOCUMENT_METADATA_COLUMNS = (
+    "source_id, fund_id, document_type, type_score, type_ambiguous, "
+    "type_evidence, scope, scope_confidence, scope_accepted, "
+    "scope_rejection_reason, identity_evidence, subfund_name, share_class, "
+    "matched_ico, matched_isin, published_at, published_at_origin, "
+    "effective_at, reporting_period_start, reporting_period_end, as_of, "
+    "parser_name, ocr_used, pages_parsed, parse_warnings"
+)
+
+
+def record_document_metadata(
+    path: Path,
+    record: DocumentMetadataRecord,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Store what was learned about one document."""
+
+    _execute_write(
+        path,
+        statement=f"""
+            INSERT INTO document_metadata (
+                {DOCUMENT_METADATA_COLUMNS}, updated_at
+            )
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            ON CONFLICT (source_id) DO UPDATE SET
+                document_type = excluded.document_type,
+                type_score = excluded.type_score,
+                type_ambiguous = excluded.type_ambiguous,
+                type_evidence = excluded.type_evidence,
+                scope = excluded.scope,
+                scope_confidence = excluded.scope_confidence,
+                scope_accepted = excluded.scope_accepted,
+                scope_rejection_reason = excluded.scope_rejection_reason,
+                identity_evidence = excluded.identity_evidence,
+                subfund_name = excluded.subfund_name,
+                share_class = excluded.share_class,
+                matched_ico = excluded.matched_ico,
+                matched_isin = excluded.matched_isin,
+                published_at = excluded.published_at,
+                published_at_origin = excluded.published_at_origin,
+                effective_at = excluded.effective_at,
+                reporting_period_start = excluded.reporting_period_start,
+                reporting_period_end = excluded.reporting_period_end,
+                as_of = excluded.as_of,
+                parser_name = excluded.parser_name,
+                ocr_used = excluded.ocr_used,
+                pages_parsed = excluded.pages_parsed,
+                parse_warnings = excluded.parse_warnings,
+                updated_at = excluded.updated_at
+            """,
+        parameters=(
+            record.source_id,
+            record.fund_id,
+            record.document_type,
+            record.type_score,
+            int(record.type_ambiguous),
+            record.type_evidence,
+            record.scope,
+            record.scope_confidence,
+            int(record.scope_accepted),
+            record.scope_rejection_reason,
+            record.identity_evidence,
+            record.subfund_name,
+            record.share_class,
+            record.matched_ico,
+            record.matched_isin,
+            record.published_at,
+            record.published_at_origin,
+            record.effective_at,
+            record.reporting_period_start,
+            record.reporting_period_end,
+            record.as_of,
+            record.parser_name,
+            int(record.ocr_used),
+            record.pages_parsed,
+            record.parse_warnings,
+            utc_now_iso(now),
+        ),
+        description="document metadata",
+    )
+
+
+def list_document_metadata(
+    path: Path,
+    *,
+    fund_id: str,
+) -> list[DocumentMetadataRecord]:
+    """Return what is stored about the documents of one fund."""
+
+    return [
+        DocumentMetadataRecord(
+            source_id=int(row[0]),
+            fund_id=str(row[1]),
+            document_type=_optional_text(row[2]),
+            type_score=int(row[3]),
+            type_ambiguous=bool(row[4]),
+            type_evidence=_optional_text(row[5]),
+            scope=_optional_text(row[6]),
+            scope_confidence=_optional_text(row[7]),
+            scope_accepted=bool(row[8]),
+            scope_rejection_reason=_optional_text(row[9]),
+            identity_evidence=_optional_text(row[10]),
+            subfund_name=_optional_text(row[11]),
+            share_class=_optional_text(row[12]),
+            matched_ico=_optional_text(row[13]),
+            matched_isin=_optional_text(row[14]),
+            published_at=_optional_text(row[15]),
+            published_at_origin=_optional_text(row[16]),
+            effective_at=_optional_text(row[17]),
+            reporting_period_start=_optional_text(row[18]),
+            reporting_period_end=_optional_text(row[19]),
+            as_of=_optional_text(row[20]),
+            parser_name=_optional_text(row[21]),
+            ocr_used=bool(row[22]),
+            pages_parsed=int(row[23]),
+            parse_warnings=_optional_text(row[24]),
+        )
+        for row in _select_rows(
+            path,
+            statement=f"""
+                SELECT {DOCUMENT_METADATA_COLUMNS}
+                FROM document_metadata
+                WHERE fund_id = ?
+                ORDER BY source_id
+                """,
+            parameters=(fund_id,),
+            description="document metadata",
         )
     ]
 

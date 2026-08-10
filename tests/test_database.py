@@ -178,7 +178,7 @@ def test_records_attempt_and_source(
     source_id = upsert_source(
         database_path,
         fund_id=fund_id,
-        url=funds[0].web,
+        url=funds[0].web or "",
         status=SourceStatus.DOWNLOADED,
         document_type="marketing_page",
         content_type="text/html",

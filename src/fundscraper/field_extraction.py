@@ -53,6 +53,7 @@ from fundscraper.output_models import (
     SourceMetadata,
     TargetReturnValue,
 )
+from fundscraper.table_extraction import iter_labelled_rows, leading_percentage
 
 NUMBER_PATTERN: Final = (
     r"\d{1,3}(?:[ .]\d{3})*(?:[,.]\d+)?"
@@ -1138,6 +1139,16 @@ def extract_fees(
     for extraction_document in documents:
         normalized_document, document_lines = normalized_document_lines(extraction_document)
 
+        # A fee table states the rate in the same row as the fee it
+        # belongs to. Read as a grid the pairing is certain; read as text
+        # it is a guess about which percentage stood nearest.
+        candidates.extend(
+            _fee_candidates_from_tables(
+                document=extraction_document,
+                normalized_document=normalized_document,
+            )
+        )
+
         boundaries = section_boundaries(normalized_document)
 
         # Fees are collected per fund section, so a manager page listing
@@ -1228,6 +1239,111 @@ def extract_fees(
             "or ongoing fee was found in the parsed public sources."
         ),
     )
+
+
+# What a fee read from a table row is worth above the same fee read from
+# a line of flattened text.
+FEE_TABLE_SCORE_BONUS: Final = 30
+
+
+def _fee_candidates_from_tables(
+    *,
+    document: ExtractionDocument,
+    normalized_document: str,
+) -> list[Candidate[FeeCollection]]:
+    """Read the fees stated by the rows of the tables of one document."""
+
+    candidates: list[Candidate[FeeCollection]] = []
+
+    for page_number, table in document.document.iter_tables():
+        items: dict[FeeType, FeeItem] = {}
+
+        quotes: list[str] = []
+
+        for row in iter_labelled_rows(table):
+            rate = next(
+                (
+                    found
+                    for cell in row.cells
+                    for found in [leading_percentage(cell)]
+                    if found is not None
+                ),
+                None,
+            )
+
+            if rate is None:
+                continue
+
+            normalized_label = normalize_search_text(row.label)
+
+            fee_type = next(
+                (
+                    candidate_type
+                    for candidate_type, keywords in FEE_KEYWORDS
+                    if any(keyword in normalized_label for keyword in keywords)
+                ),
+                None,
+            )
+
+            if fee_type is None or fee_type in items:
+                continue
+
+            if rate < 0 or rate > FEE_MAXIMUM_RATE_PERCENT:
+                continue
+
+            normalized_row = normalize_search_text(row.row_text)
+
+            items[fee_type] = FeeItem(
+                type=fee_type,
+                rate_percent=rate,
+                frequency=_fee_frequency(fee_type),
+                maximum=any(marker in normalized_row for marker in FEE_MAXIMUM_MARKERS),
+                basis=row.row_text,
+                condition=row.row_text,
+                tiers=_parse_fee_tiers(
+                    line=row.row_text,
+                    normalized=normalized_row,
+                ),
+            )
+
+            quotes.append(row.row_text)
+
+        if not items:
+            continue
+
+        quote = "\n".join(quotes)
+
+        needle = normalize_search_text(quote)[:60]
+
+        candidates.append(
+            Candidate(
+                value=FeeCollection(items=list(items.values())),
+                raw_value=quote,
+                quote=quote,
+                page_number=page_number,
+                document=document,
+                score=(
+                    document_priority(
+                        document,
+                        FEE_DOCUMENT_PRIORITY,
+                    )
+                    + 60
+                    + FEE_TABLE_SCORE_BONUS
+                    + min(
+                        len(items) * 10,
+                        40,
+                    )
+                ),
+                value_offset=max(normalized_document.find(needle), 0),
+            )
+        )
+
+    return candidates
+
+
+# A fee above this is a parsing artefact rather than a rate an investor
+# pays. The delivered audit uses the same bound.
+FEE_MAXIMUM_RATE_PERCENT: Final = 100.0
 
 
 def extract_aum(

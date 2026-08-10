@@ -237,6 +237,206 @@ def test_pipeline_can_use_avant_as_explicit_fallback(
     asyncio.run(run_test())
 
 
+def test_official_sources_are_exhausted_before_any_fallback(
+    tmp_path: Path,
+) -> None:
+    """A fund publishing its own statute must not trigger an adapter."""
+
+    fund = FundInput(
+        name="Example SICAV a.s.",
+        web="https://example.com/",
+    )
+
+    database_path = tmp_path / "fundscraper.sqlite3"
+    output_path = tmp_path / "funds.enriched.json"
+
+    initialize_database(database_path)
+    register_funds(
+        database_path,
+        [fund],
+    )
+    synchronize_output_file(
+        funds=[fund],
+        output_path=output_path,
+    )
+
+    # A key information document, a statute and an annual report cover
+    # every required group, which is what makes a fallback pointless.
+    home = b"""
+    <!doctype html>
+    <html>
+      <head><title>Example SICAV a.s.</title></head>
+      <body>
+        <a href="/dokumenty/sdeleni-klicovych-informaci.pdf">Klicove informace</a>
+        <a href="/dokumenty/statut-fondu.pdf">Statut fondu</a>
+        <a href="/dokumenty/vyrocni-zprava-2024.pdf">Vyrocni zprava 2024</a>
+      </body>
+    </html>
+    """
+
+    async def handler(
+        request: httpx.Request,
+    ) -> httpx.Response:
+        if request.url.path.endswith(".pdf"):
+            return httpx.Response(
+                status_code=200,
+                headers={"Content-Type": "application/pdf"},
+                content=b"%PDF-1.7 STATUTE",
+                request=request,
+            )
+
+        if request.url.path == "/robots.txt":
+            return httpx.Response(
+                status_code=404,
+                request=request,
+            )
+
+        return httpx.Response(
+            status_code=200,
+            headers={"Content-Type": "text/html"},
+            content=home,
+            request=request,
+        )
+
+    async def run_test() -> None:
+        settings = HttpSettings(
+            max_retries=0,
+            retry_min_wait_seconds=0,
+            retry_max_wait_seconds=0,
+        )
+
+        async with HttpFetcher(
+            settings,
+            tmp_path / "http",
+            transport=httpx.MockTransport(handler),
+        ) as fetcher:
+            result = await run_fund_pipeline(
+                database_path=database_path,
+                output_path=output_path,
+                parsed_directory=(tmp_path / "parsed"),
+                fund=fund,
+                fetcher=fetcher,
+                max_pages=3,
+                max_depth=0,
+                max_documents=4,
+                avant_fallback=True,
+            )
+
+        # The official site answered every required group, so the
+        # fallback adapter that was explicitly enabled stays unused.
+        assert result.adapter_name == "official_only"
+
+        assert result.official_sources_sufficient
+
+        assert result.official_missing_document_groups == ()
+
+        assert not result.fallback_used
+
+        assert result.official_documents_found >= 3
+
+    asyncio.run(run_test())
+
+
+def test_a_lone_official_kid_still_allows_the_fallback(
+    tmp_path: Path,
+) -> None:
+    """Exploring the official site first must not foreclose a fallback."""
+
+    fund = FundInput(
+        name="Example SICAV a.s.",
+        web="https://example.com/",
+    )
+
+    database_path = tmp_path / "fundscraper.sqlite3"
+    output_path = tmp_path / "funds.enriched.json"
+
+    initialize_database(database_path)
+    register_funds(
+        database_path,
+        [fund],
+    )
+    synchronize_output_file(
+        funds=[fund],
+        output_path=output_path,
+    )
+
+    # The fund publishes only its key information document. The statute
+    # and the reporting history are still missing.
+    home = b"""
+    <!doctype html>
+    <html>
+      <head><title>Example SICAV a.s.</title></head>
+      <body>
+        <a href="/dokumenty/sdeleni-klicovych-informaci.pdf">Klicove informace</a>
+      </body>
+    </html>
+    """
+
+    async def handler(
+        request: httpx.Request,
+    ) -> httpx.Response:
+        if request.url.path.endswith(".pdf"):
+            return httpx.Response(
+                status_code=200,
+                headers={"Content-Type": "application/pdf"},
+                content=b"%PDF-1.7 KID",
+                request=request,
+            )
+
+        if request.url.path == "/robots.txt":
+            return httpx.Response(
+                status_code=404,
+                request=request,
+            )
+
+        return httpx.Response(
+            status_code=200,
+            headers={"Content-Type": "text/html"},
+            content=home,
+            request=request,
+        )
+
+    async def run_test() -> None:
+        settings = HttpSettings(
+            max_retries=0,
+            retry_min_wait_seconds=0,
+            retry_max_wait_seconds=0,
+        )
+
+        async with HttpFetcher(
+            settings,
+            tmp_path / "http",
+            transport=httpx.MockTransport(handler),
+        ) as fetcher:
+            result = await run_fund_pipeline(
+                database_path=database_path,
+                output_path=output_path,
+                parsed_directory=(tmp_path / "parsed"),
+                fund=fund,
+                fetcher=fetcher,
+                max_pages=3,
+                max_depth=0,
+                max_documents=2,
+                avant_fallback=True,
+            )
+
+        # The official stage ran and found its key information document,
+        # but the fallback is still reached because what remains missing
+        # is exactly what a fallback can supply.
+        assert result.official_documents_found >= 1
+
+        assert not result.official_sources_sufficient
+
+        assert set(result.official_missing_document_groups) == {
+            "governing_document",
+            "reporting_document",
+        }
+
+        assert result.adapter_name == "avantfunds"
+
+    asyncio.run(run_test())
+
+
 def test_batch_processes_multiple_funds_concurrently(
     tmp_path: Path,
 ) -> None:

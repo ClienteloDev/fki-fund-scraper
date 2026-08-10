@@ -94,10 +94,9 @@ async def crawl_fund_site(
 
     queued_urls: set[str] = set()
 
-    for seed_url in (
-        fund.web,
-        *navigation_seed_urls,
-    ):
+    seed_candidates = (fund.web, *navigation_seed_urls) if fund.web else navigation_seed_urls
+
+    for seed_url in seed_candidates:
         seed_key = canonical_url(seed_url)
 
         if seed_key in queued_urls:

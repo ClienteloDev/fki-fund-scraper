@@ -63,7 +63,7 @@ class BhsAdapter:
         self._cached_entries: tuple[BhsCatalogEntry, ...] | None = None
 
     def supports(self, fund: FundInput) -> bool:
-        return canonical_domain(fund.web) == BHS_DOMAIN
+        return canonical_domain(fund.web or "") == BHS_DOMAIN
 
     async def discover(
         self,

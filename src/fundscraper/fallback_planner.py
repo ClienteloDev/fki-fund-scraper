@@ -65,7 +65,7 @@ class FundFallbackPlan(BaseModel):
 
     fund_id: str
     fund_name: str
-    web: HttpUrl
+    web: HttpUrl | None = None
     domain: str
     processing_status: ProcessingStatus
 
@@ -101,7 +101,7 @@ def build_fallback_plan(
 
     output_by_id = {output.fund_id: output for output in outputs}
 
-    domain_counts = Counter(canonical_domain(fund.web) for fund in funds)
+    domain_counts = Counter(canonical_domain(fund.web or "") for fund in funds)
 
     plans: list[FundFallbackPlan] = []
 
@@ -144,7 +144,7 @@ def build_fallback_plan(
 
         has_scanned_documents = any(document.scanned_candidate for document in parsed_documents)
 
-        domain = canonical_domain(fund.web)
+        domain = canonical_domain(fund.web or "")
 
         actions: list[FallbackAction] = []
 
@@ -264,7 +264,7 @@ def build_fallback_plan(
             FundFallbackPlan(
                 fund_id=output.fund_id,
                 fund_name=fund.name,
-                web=HttpUrl(fund.web),
+                web=(HttpUrl(fund.web) if fund.web else None),
                 domain=domain,
                 processing_status=(output.processing.status),
                 missing_fields=missing_fields,
