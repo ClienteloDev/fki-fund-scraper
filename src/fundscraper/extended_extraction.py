@@ -27,6 +27,7 @@ from urllib.parse import SplitResult, urlsplit
 
 from pydantic import HttpUrl, ValidationError
 
+from fundscraper.anydoc_parser import is_anydoc_parser
 from fundscraper.extended_validation import (
     ValidationFinding,
     ValidationSeverity,
@@ -77,6 +78,7 @@ from fundscraper.field_extraction import (
     declared_multiplier,
     document_priority,
     extract_date,
+    fallback_confidence,
     fund_identity_tokens,
     missing_result,
     normalize_currency,
@@ -2148,6 +2150,21 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
 
     record = best_candidate.document.record
 
+    review_required = confidence is Confidence.LOW or best_scope is SourceScope.SHARE_CLASS
+
+    # A series read from the layout fallback carries the same doubt as
+    # any other value taken from a rebuilt text: the rows were assembled
+    # from a page that was re-flowed, not read off it. The rule is the
+    # one applied to the delivered fields, kept here because this result
+    # is built without going through them.
+    if is_anydoc_parser(record.parser_name):
+        review_required = True
+
+        confidence = fallback_confidence(
+            confidence,
+            placed_on_a_page=best_candidate.page_number is not None,
+        )
+
     return FieldResult[ValueT](
         status=FieldStatus.FOUND,
         value=value,
@@ -2169,7 +2186,7 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
         extraction=ExtractionMetadata(
             method=ExtractionMethod.TABLE,
             confidence=confidence,
-            review_required=(confidence is Confidence.LOW or best_scope is SourceScope.SHARE_CLASS),
+            review_required=review_required,
         ),
     )
 

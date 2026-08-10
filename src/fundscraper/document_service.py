@@ -4,8 +4,15 @@ import asyncio
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+from fundscraper.anydoc_fallback import (
+    FallbackDecision,
+    FallbackOutcome,
+    apply_layout_fallback,
+    extracted_field_names,
+)
 from fundscraper.database import (
     AttemptStatus,
     DatabaseError,
@@ -31,6 +38,11 @@ from fundscraper.document_parser import (
 )
 from fundscraper.models import FundInput
 from fundscraper.output_service import stable_fund_id
+
+# What the parse the layout fallback replaced is stored under. The
+# pipeline reads the unsuffixed file; this one is kept so the page-numbered
+# reading of the same source is never lost.
+PRIMARY_PARSE_SUFFIX = ".primary"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,20 +74,73 @@ class DocumentParsingSummary:
     ocr_used: int = 0
     ocr_available: bool = False
 
+    # What the selective layout fallback did. It is reported next to the
+    # parse counts rather than inside them, because every one of these
+    # documents was parsed by the primary parser first.
+    anydoc_triggered: int = 0
+    anydoc_accepted: int = 0
+    anydoc_rejected: int = 0
+    anydoc_blocked: int = 0
+    anydoc_failed: int = 0
+    anydoc_seconds: float = 0.0
+
+
+def _verification_record(
+    *,
+    source: SourceRecord,
+    fund_id: str,
+    document: ParsedDocument,
+) -> ParsedDocumentRecord:
+    """
+    Describe one reading the way the extraction expects to receive it.
+
+    This record never reaches the database. It exists so the two readings
+    of a document can be put in front of the extraction and compared by
+    what it gets out of them.
+    """
+
+    return ParsedDocumentRecord(
+        source_id=source.source_id,
+        fund_id=fund_id,
+        url=source.url,
+        title=None,
+        document_type=source.document_type,
+        content_type=source.content_type,
+        retrieved_at=None,
+        document_format=document.document_format.value,
+        parser_name=document.parser_name,
+        page_count=document.page_count,
+        character_count=document.character_count,
+        scanned_candidate=document.scanned_candidate,
+        text_path="",
+        # The extraction dates its evidence from this, and it is only ever
+        # compared with itself here, so the time of the comparison is
+        # enough and always parses.
+        parsed_at=datetime.now(UTC).isoformat(),
+        local_path=source.local_path,
+    )
+
 
 def _parse_source_document(
     *,
     source: SourceRecord,
     parsed_directory: Path,
     fund_id: str,
+    fund_name: str,
     allow_ocr: bool = False,
-) -> tuple[ParsedDocument, Path]:
+    allow_anydoc_fallback: bool = False,
+) -> tuple[ParsedDocument, Path, FallbackDecision]:
     """
     Read, parse and validate one source outside the event-loop thread.
 
     The document is parsed normally first. Optical recognition is only
     attempted when that produced a document with no usable text, so a
     PDF that reads perfectly well is never sent through it.
+
+    ``allow_anydoc_fallback`` permits a second reading of a PDF whose
+    layout defeated the parser. It never runs first and never runs on a
+    document the primary parser handled well, and the primary parse is
+    kept on disk either way.
     """
 
     if source.local_path is None:
@@ -108,6 +173,43 @@ def _parse_source_document(
         if recognised.character_count > document.character_count:
             document = recognised
 
+    decision = FallbackDecision(
+        outcome=FallbackOutcome.NOT_TRIGGERED,
+        document=document,
+    )
+
+    if allow_anydoc_fallback:
+        decision = apply_layout_fallback(
+            body=body,
+            primary=document,
+            document_type=source.document_type,
+            fund_name=fund_name,
+            verify=lambda reading: extracted_field_names(
+                document=reading,
+                record=_verification_record(
+                    source=source,
+                    fund_id=fund_id,
+                    document=reading,
+                ),
+                fund_name=fund_name,
+            ),
+        )
+
+    if decision.accepted and decision.document is not None:
+        # The primary parse keeps its own file. Its pages carry the page
+        # numbers every quote is checked against, and a fallback that
+        # later turns out to have been the wrong call can be undone
+        # without downloading anything again.
+        write_parsed_document(
+            directory=parsed_directory,
+            fund_id=fund_id,
+            source_id=source.source_id,
+            document=document,
+            suffix=PRIMARY_PARSE_SUFFIX,
+        )
+
+        document = decision.document
+
     parsed_path = write_parsed_document(
         directory=parsed_directory,
         fund_id=fund_id,
@@ -118,6 +220,7 @@ def _parse_source_document(
     return (
         load_parsed_document(parsed_path),
         parsed_path,
+        decision,
     )
 
 
@@ -150,6 +253,7 @@ async def parse_fund_documents(
     parsed_directory: Path,
     force: bool = False,
     allow_ocr: bool = False,
+    allow_anydoc_fallback: bool = False,
 ) -> DocumentParsingSummary:
     """
     Parse all downloaded sources belonging to one fund.
@@ -157,6 +261,11 @@ async def parse_fund_documents(
     ``allow_ocr`` permits optical recognition for the documents that
     produced no usable text. It is off by default, because recognising
     every PDF would cost far more than it returns.
+
+    ``allow_anydoc_fallback`` permits a second reading of the PDFs whose
+    layout defeated the parser. The primary parser still reads every
+    document first and keeps the result unless the second reading is
+    measurably better.
     """
 
     fund_id = stable_fund_id(fund)
@@ -175,6 +284,8 @@ async def parse_fund_documents(
     scanned_candidates = 0
     total_characters = 0
 
+    fallback_decisions: list[FallbackDecision] = []
+
     for source in sources:
         record_attempt(
             database_path,
@@ -188,13 +299,17 @@ async def parse_fund_documents(
             if source.local_path is None:
                 raise DocumentParseError("Downloaded source does not contain a local file path")
 
-            validated_document, parsed_path = await asyncio.to_thread(
+            validated_document, parsed_path, fallback_decision = await asyncio.to_thread(
                 _parse_source_document,
                 source=source,
                 parsed_directory=parsed_directory,
                 fund_id=fund_id,
+                fund_name=fund.name,
                 allow_ocr=allow_ocr,
+                allow_anydoc_fallback=allow_anydoc_fallback,
             )
+
+            fallback_decisions.append(fallback_decision)
 
             record_parsed_document(
                 database_path,
@@ -326,6 +441,22 @@ async def parse_fund_documents(
         ),
         ocr_used=sum(1 for item in all_facts if item.ocr_used),
         ocr_available=ocr_available(),
+        anydoc_triggered=sum(
+            1
+            for decision in fallback_decisions
+            if decision.outcome is not FallbackOutcome.NOT_TRIGGERED
+        ),
+        anydoc_accepted=sum(1 for decision in fallback_decisions if decision.accepted),
+        anydoc_rejected=sum(
+            1 for decision in fallback_decisions if decision.outcome is FallbackOutcome.REJECTED
+        ),
+        anydoc_blocked=sum(
+            1 for decision in fallback_decisions if decision.outcome is FallbackOutcome.BLOCKED
+        ),
+        anydoc_failed=sum(
+            1 for decision in fallback_decisions if decision.outcome is FallbackOutcome.FAILED
+        ),
+        anydoc_seconds=sum(decision.conversion_seconds for decision in fallback_decisions),
     )
 
 

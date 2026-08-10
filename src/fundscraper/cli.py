@@ -995,6 +995,16 @@ def parse_fund_documents_command(
             help="Parse sources already marked as parsed again.",
         ),
     ] = False,
+    anydoc_fallback: Annotated[
+        bool,
+        typer.Option(
+            "--anydoc-fallback",
+            help=(
+                "Read PDFs whose layout defeated the parser a second time "
+                "with AnyDoc, and keep that reading only when it is better."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Convert downloaded fund documents into normalized text."""
 
@@ -1034,6 +1044,7 @@ def parse_fund_documents_command(
                 fund=fund,
                 parsed_directory=parsed_directory,
                 force=force,
+                allow_anydoc_fallback=anydoc_fallback,
             )
         )
     except (
@@ -1053,6 +1064,16 @@ def parse_fund_documents_command(
     typer.echo(f"Scanned PDF candidates: {summary.scanned_candidates}")
     typer.echo(f"Extracted characters: {summary.total_characters}")
     typer.echo(f"Failures: {len(summary.failures)}")
+
+    if summary.anydoc_triggered:
+        typer.echo(
+            f"AnyDoc layout fallback: {summary.anydoc_triggered} triggered, "
+            f"{summary.anydoc_accepted} accepted, "
+            f"{summary.anydoc_rejected} rejected, "
+            f"{summary.anydoc_blocked} blocked, "
+            f"{summary.anydoc_failed} failed "
+            f"({summary.anydoc_seconds:.1f}s)"
+        )
 
     if summary.failures:
         typer.echo("")

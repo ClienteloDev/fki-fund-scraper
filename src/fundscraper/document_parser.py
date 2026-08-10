@@ -854,8 +854,14 @@ def write_parsed_document(
     fund_id: str,
     source_id: int,
     document: ParsedDocument,
+    suffix: str = "",
 ) -> Path:
-    """Persist a parsed document as an atomic JSON file."""
+    """
+    Persist a parsed document as an atomic JSON file.
+
+    ``suffix`` names a second reading of the same source kept beside the
+    one the pipeline uses, so a parse that was replaced is still on disk.
+    """
 
     fund_directory = directory / fund_id
 
@@ -864,7 +870,7 @@ def write_parsed_document(
         exist_ok=True,
     )
 
-    output_path = fund_directory / f"{source_id}.json"
+    output_path = fund_directory / f"{source_id}{suffix}.json"
 
     temporary_path = output_path.with_suffix(".json.tmp")
 

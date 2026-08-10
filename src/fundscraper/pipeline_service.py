@@ -297,6 +297,7 @@ async def run_fund_pipeline(
     porovnejfondy_fallback: bool = False,
     output_lock: asyncio.Lock | None = None,
     discovery_run_id: str = "",
+    anydoc_fallback: bool = False,
 ) -> FundPipelineResult:
     """Run adapter discovery, crawl, parsing and extraction for one fund."""
 
@@ -412,6 +413,7 @@ async def run_fund_pipeline(
             fund=fund,
             parsed_directory=parsed_directory,
             force=force,
+            allow_anydoc_fallback=anydoc_fallback,
         )
 
         parsing_summary = parsing_result
@@ -620,6 +622,7 @@ async def run_fund_batch(
     avant_fallback: bool = False,
     amista_fallback: bool = False,
     porovnejfondy_fallback: bool = False,
+    anydoc_fallback: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> BatchPipelineSummary:
     """Run multiple funds concurrently with serialized output writes."""
@@ -657,6 +660,7 @@ async def run_fund_batch(
                 avant_fallback=avant_fallback,
                 amista_fallback=amista_fallback,
                 porovnejfondy_fallback=porovnejfondy_fallback,
+                anydoc_fallback=anydoc_fallback,
                 output_lock=output_lock,
             )
 
