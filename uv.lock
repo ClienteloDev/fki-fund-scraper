@@ -106,6 +106,21 @@ wheels = [
 ]
 
 [[package]]
+name = "firecrawl-anydoc"
+version = "0.1.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/1e/b5a9a58da186821b20cd9057861563f9748eeca956e27b1dab23d686e767/firecrawl_anydoc-0.1.7.tar.gz", hash = "sha256:857a97f2878ebbde3e1b4340a354b2ef13f8afbac2f312fd028365600ecb0772", size = 197927, upload-time = "2026-08-07T09:29:20.491Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/02/99/13f2436e70b62a682315c2dbd3ebabb7d3b22827e80816072d32e05c4661/firecrawl_anydoc-0.1.7-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:a0abd5421243ee8229a19f7d83507a0e492d447e301d03b177481a0d400cbe4a", size = 3338531, upload-time = "2026-08-07T09:29:09.948Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/0e/93cd4095b532e81e10b3b7679ffede695c1fc230ea1fa3e937dcd4996f21/firecrawl_anydoc-0.1.7-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:4ab410d12eb7d339e60356eecf2375786acd2d3c6660dcbe1e079eb60addc004", size = 3169866, upload-time = "2026-08-07T09:29:11.582Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/9c/d89ee7316e125b6cde08ea30afbcf26f1476bc25f68ed7adbcc48167333b/firecrawl_anydoc-0.1.7-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d378ab1d0fc42b4304795a9442d3b2626ce350519143208c631fcc1a3079b82b", size = 3218213, upload-time = "2026-08-07T09:29:12.974Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/8e/07649d0d6c905c45fd6e9c5117914f140160dd670e9d38114d1c279c8da9/firecrawl_anydoc-0.1.7-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7f5fd3a4b0360e75e51b7f951a0b4dcc2a53f158d039b9be3e542bb956194094", size = 3429872, upload-time = "2026-08-07T09:29:14.5Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/44/1a873a3b979903a01d98543626b5b9f18c6902495f9513cbd76e33d1bd3e/firecrawl_anydoc-0.1.7-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:5d613303d9eb7ccb11a61dbb10602e928ecfd4e8672bb5d308393f36b4aca86c", size = 3395677, upload-time = "2026-08-07T09:29:15.927Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/c9/8a79ca80302969d940fa8ef98f2ad17653725bb65a9a51bfee494500f5ef/firecrawl_anydoc-0.1.7-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:561825a24e87ec0d37164a9bddbc9597b0b30c282f9c07c6cfe3e96da0c87e59", size = 3669132, upload-time = "2026-08-07T09:29:17.624Z" },
+    { url = "https://files.pythonhosted.org/packages/12/54/d52ee3d21cdf6b95e2f8f6a3197a329604f4b12be12e89d036bd2b0fbe90/firecrawl_anydoc-0.1.7-cp310-abi3-win_amd64.whl", hash = "sha256:304850c6e416db7b481bcf00b16e9ccff6fb16d1e618e1f0f00eadd9e5b6604d", size = 3501307, upload-time = "2026-08-07T09:29:19.197Z" },
+]
+
+[[package]]
 name = "fundscraper"
 version = "0.1.0"
 source = { editable = "." }
@@ -120,6 +135,11 @@ dependencies = [
     { name = "typer" },
 ]
 
+[package.optional-dependencies]
+anydoc = [
+    { name = "firecrawl-anydoc" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
@@ -130,6 +150,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiolimiter", specifier = ">=1.2.1" },
+    { name = "firecrawl-anydoc", marker = "extra == 'anydoc'", specifier = ">=0.1.7" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pymupdf", specifier = ">=1.28.0" },
@@ -138,6 +159,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "typer", specifier = ">=0.27.0" },
 ]
+provides-extras = ["anydoc"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -435,6 +435,29 @@ CAPITAL_METRIC_BY_LABEL: Final[
 )
 
 
+# Wording turning a total into a figure per single share. "Fondovy
+# kapital na 1 akcii" is the value of one share, not the capital of the
+# fund, and reading it as the latter reported a billion-crown fund as
+# holding one crown.
+PER_SHARE_MARKERS: Final[tuple[str, ...]] = (
+    "na 1 akcii",
+    "na jednu akcii",
+    "na akcii",
+    "na investicni akcii",
+    "na podilovy list",
+    "per share",
+    "na akcii v",
+)
+
+
+def describes_value_per_share(
+    normalized: str,
+) -> bool:
+    """Return whether a label states a value per single share."""
+
+    return any(marker in normalized for marker in PER_SHARE_MARKERS)
+
+
 # Wording proving a capital figure describes the manager, the group or
 # every fund together. Such a value is never the assets of this fund.
 MANAGER_LEVEL_CAPITAL_MARKERS: Final[tuple[str, ...]] = (

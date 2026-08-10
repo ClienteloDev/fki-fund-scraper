@@ -79,7 +79,7 @@ class PorovnejFondyAdapter:
         self,
         fund: FundInput,
     ) -> bool:
-        return canonical_domain(fund.web) == POROVNEJ_FONDY_DOMAIN
+        return canonical_domain(fund.web or "") == POROVNEJ_FONDY_DOMAIN
 
     async def discover(
         self,

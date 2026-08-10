@@ -392,6 +392,15 @@ class HttpFetcher:
                     f"HTTP network request failed: {exc}",
                     url=normalized_url,
                 ) from exc
+            except httpx.HTTPError as exc:
+                # A redirect loop or a malformed response is a failure of
+                # one address, not of the run. Letting it escape as an
+                # httpx error killed a whole crawl at the fifty-sixth
+                # fund, so every HTTP failure leaves here as a FetchError.
+                raise NetworkFetchError(
+                    f"HTTP request failed: {type(exc).__name__}: {exc}",
+                    url=normalized_url,
+                ) from exc
 
         raise NetworkFetchError(
             "HTTP request did not produce a result",

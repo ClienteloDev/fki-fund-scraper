@@ -42,6 +42,10 @@ from fundscraper.html_discovery import DiscoveredLink
 from fundscraper.http_client import HttpFetcher
 from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_url
+from fundscraper.official_discovery import (
+    OfficialDiscoveryResult,
+    discover_official_sources,
+)
 from fundscraper.output_models import (
     ProcessingMetadata,
     ProcessingStatus,
@@ -89,6 +93,29 @@ class FundPipelineResult:
     ] = ()
 
     extended_rows: int = 0
+
+    # What the official-source stage did before any external fallback
+    # was allowed to run.
+    official_pages_inspected: int = 0
+    official_documents_found: int = 0
+    official_documents_rejected: int = 0
+    official_stage_exhausted: bool = False
+
+    # Whether the official sources covered every required document
+    # group. Completing the exploration and finding enough are separate
+    # facts, and only the second one may skip a fallback.
+    official_sources_sufficient: bool = False
+
+    official_missing_document_groups: tuple[
+        str,
+        ...,
+    ] = ()
+
+    fallback_used: bool = False
+    discovery_method_counts: tuple[
+        tuple[str, int],
+        ...,
+    ] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +296,8 @@ async def run_fund_pipeline(
     amista_fallback: bool = False,
     porovnejfondy_fallback: bool = False,
     output_lock: asyncio.Lock | None = None,
+    discovery_run_id: str = "",
+    anydoc_fallback: bool = False,
 ) -> FundPipelineResult:
     """Run adapter discovery, crawl, parsing and extraction for one fund."""
 
@@ -285,6 +314,10 @@ async def run_fund_pipeline(
     failures: list[str] = []
 
     adapter_name: str | None = None
+
+    official_discovery: OfficialDiscoveryResult | None = None
+
+    fallback_used = False
 
     adapter_result = DomainAdapterResult(
         adapter_name="none",
@@ -308,16 +341,48 @@ async def run_fund_pipeline(
     )
 
     try:
-        adapter_result, adapter_name = await _discover_adapter_sources(
+        # The official website of the fund is exhausted first. An
+        # external source may only add what the fund itself does not
+        # publish, so the adapters run afterwards and only if needed.
+        official_result = await discover_official_sources(
+            database_path=database_path,
             fund=fund,
             fetcher=fetcher,
             force=force,
-            avant_fallback=avant_fallback,
-            amista_fallback=amista_fallback,
-            porovnejfondy_fallback=porovnejfondy_fallback,
+            run_id=discovery_run_id,
         )
 
-        failures.extend(adapter_result.warnings)
+        official_discovery = official_result
+
+        failures.extend(official_result.warnings)
+
+        if official_result.is_sufficient:
+            # The official site answered every required document group.
+            # Running a third-party adapter now would only add weaker
+            # copies of what the fund itself already published.
+            adapter_result = DomainAdapterResult(
+                adapter_name="official_only",
+                navigation_urls=(),
+                documents=(),
+                warnings=(),
+            )
+
+            adapter_name = "official_only"
+        else:
+            # The official site was explored first and came up short.
+            # What it does not publish is what the fallbacks are for.
+            adapter_result, adapter_name = await _discover_adapter_sources(
+                fund=fund,
+                fetcher=fetcher,
+                force=force,
+                avant_fallback=avant_fallback,
+                amista_fallback=amista_fallback,
+                porovnejfondy_fallback=porovnejfondy_fallback,
+            )
+
+            fallback_used = bool(adapter_result.documents or adapter_result.navigation_urls)
+
+            failures.extend(adapter_result.warnings)
 
         # This call must remain outside the adapter condition.
         # Funds without a domain adapter still need to run
@@ -330,8 +395,8 @@ async def run_fund_pipeline(
             max_depth=max_depth,
             max_documents=max_documents,
             document_concurrency=document_concurrency,
-            navigation_seed_urls=(adapter_result.navigation_urls),
-            document_seed_links=(adapter_result.documents),
+            navigation_seed_urls=(official_result.navigation_urls + adapter_result.navigation_urls),
+            document_seed_links=(official_result.documents + adapter_result.documents),
             force=force,
         )
 
@@ -348,6 +413,7 @@ async def run_fund_pipeline(
             fund=fund,
             parsed_directory=parsed_directory,
             force=force,
+            allow_anydoc_fallback=anydoc_fallback,
         )
 
         parsing_summary = parsing_result
@@ -422,6 +488,14 @@ async def run_fund_pipeline(
                 for field_name, status in extraction_result.extended_statuses
             ),
             extended_rows=extraction_result.extended_rows,
+            official_pages_inspected=(official_result.metrics.pages_inspected),
+            official_documents_found=(official_result.metrics.documents_accepted),
+            official_documents_rejected=(official_result.metrics.documents_rejected),
+            official_stage_exhausted=(official_result.is_exhausted),
+            official_sources_sufficient=(official_result.is_sufficient),
+            official_missing_document_groups=(official_result.missing_document_groups),
+            fallback_used=fallback_used,
+            discovery_method_counts=tuple(sorted(official_result.metrics.method_counts.items())),
             failures=tuple(failures),
             duration_seconds=round(
                 perf_counter() - started,
@@ -486,6 +560,29 @@ async def run_fund_pipeline(
             scanned_candidates=(
                 parsing_summary.scanned_candidates if parsing_summary is not None else 0
             ),
+            official_pages_inspected=(
+                official_discovery.metrics.pages_inspected if official_discovery is not None else 0
+            ),
+            official_documents_found=(
+                official_discovery.metrics.documents_accepted
+                if official_discovery is not None
+                else 0
+            ),
+            official_documents_rejected=(
+                official_discovery.metrics.documents_rejected
+                if official_discovery is not None
+                else 0
+            ),
+            official_stage_exhausted=(
+                official_discovery.is_exhausted if official_discovery is not None else False
+            ),
+            official_sources_sufficient=(
+                official_discovery.is_sufficient if official_discovery is not None else False
+            ),
+            official_missing_document_groups=(
+                official_discovery.missing_document_groups if official_discovery is not None else ()
+            ),
+            fallback_used=fallback_used,
             fields_found=(extraction_summary.fields_found if extraction_summary is not None else 0),
             fields_missing=(
                 extraction_summary.fields_missing if extraction_summary is not None else 5
@@ -525,6 +622,7 @@ async def run_fund_batch(
     avant_fallback: bool = False,
     amista_fallback: bool = False,
     porovnejfondy_fallback: bool = False,
+    anydoc_fallback: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> BatchPipelineSummary:
     """Run multiple funds concurrently with serialized output writes."""
@@ -562,6 +660,7 @@ async def run_fund_batch(
                 avant_fallback=avant_fallback,
                 amista_fallback=amista_fallback,
                 porovnejfondy_fallback=porovnejfondy_fallback,
+                anydoc_fallback=anydoc_fallback,
                 output_lock=output_lock,
             )
 

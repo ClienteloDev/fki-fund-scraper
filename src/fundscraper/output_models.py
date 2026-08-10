@@ -55,6 +55,14 @@ class DocumentType(StrEnum):
     INFOLETTER = "infoletter"
     MARKETING_PAGE = "marketing_page"
     REGISTER = "register"
+
+    # Added in step 6. A prospectus, a price list and an investor notice
+    # are official fund documents in their own right, and reporting them
+    # as "other" lost the difference between a fee schedule and a leaflet.
+    PROSPECTUS = "prospectus"
+    PRICE_LIST = "price_list"
+    INVESTOR_NOTICE = "investor_notice"
+
     OTHER = "other"
 
 
@@ -736,7 +744,11 @@ class ProcessingMetadata(StrictModel):
 class FundOutput(StrictModel):
     fund_id: str = Field(pattern=r"^fund_[0-9a-f]{16}$")
     name: str = Field(min_length=1)
-    web: str = Field(min_length=1)
+
+    # Left empty for a fund whose official website is not known. The
+    # delivery schema still requires one, so such a fund is reported as
+    # unpublishable at export rather than given an invented address.
+    web: str | None = None
 
     identity: FundIdentity
 

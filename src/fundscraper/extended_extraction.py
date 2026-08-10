@@ -27,6 +27,7 @@ from urllib.parse import SplitResult, urlsplit
 
 from pydantic import HttpUrl, ValidationError
 
+from fundscraper.anydoc_parser import is_anydoc_parser
 from fundscraper.extended_validation import (
     ValidationFinding,
     ValidationSeverity,
@@ -53,6 +54,7 @@ from fundscraper.field_definitions import (
     declared_frequency,
     describes_manager_level_capital,
     describes_statutory_capital,
+    describes_value_per_share,
     frequency_from_gap_days,
     is_news_article_path,
     is_news_link_noise,
@@ -76,6 +78,7 @@ from fundscraper.field_extraction import (
     declared_multiplier,
     document_priority,
     extract_date,
+    fallback_confidence,
     fund_identity_tokens,
     missing_result,
     normalize_currency,
@@ -119,6 +122,7 @@ from fundscraper.output_models import (
     SourceAttempt,
     SourceMetadata,
 )
+from fundscraper.table_extraction import iter_table_values
 
 PARTY_DOCUMENT_PRIORITY: Final = {
     DocumentType.STATUTE: 90,
@@ -650,6 +654,238 @@ def extract_aum_history(
     )
 
 
+# What a value read from a table is worth above the same value read from
+# the flattened text. A structured candidate carries its own label and
+# period, so it outranks a text candidate of the same figure.
+TABLE_SCORE_BONUS: Final = 30
+
+
+def _table_offset(
+    *,
+    document: ExtractionDocument,
+    row_text: str,
+) -> int:
+    """
+    Return where a table row sits inside the normalized document.
+
+    The scope rules locate a value by its offset, so a table value needs
+    a real one. When the row cannot be found the value is placed at the
+    start, which is the most conservative position on a shared page.
+    """
+
+    normalized_document, _ = normalized_document_lines(document)
+
+    needle = normalize_search_text(row_text)[:60]
+
+    if not needle:
+        return 0
+
+    found = normalized_document.find(needle)
+
+    return max(found, 0)
+
+
+def _capital_from_tables(
+    document: ExtractionDocument,
+) -> list[CapitalCandidate]:
+    """Read the dated capital figures out of the tables of one document."""
+
+    candidates: list[CapitalCandidate] = []
+
+    for page_number, table in document.document.iter_tables():
+        for value in iter_table_values(table):
+            if value.is_percentage or value.as_of is None or value.currency is None:
+                # Without a period and a currency of its own the figure is
+                # no better than what the text extractor already reads.
+                continue
+
+            normalized_label = normalize_search_text(value.label)
+
+            if describes_value_per_share(normalized_label):
+                # A per-share figure belongs to the value series, never
+                # to the capital of the fund.
+                continue
+
+            metric = classify_capital_metric(normalized_label)
+
+            if metric is None:
+                continue
+
+            metric = _refine_capital_metric(
+                metric=metric,
+                normalized_line=normalize_search_text(value.label),
+                normalized_context=normalize_search_text(value.row_text),
+            )
+
+            try:
+                observation = CapitalObservation(
+                    amount=value.value,
+                    currency=value.currency,
+                    metric_type=metric,
+                    as_of=value.as_of,
+                    share_class=share_class_code(value.label),
+                )
+            except (ValidationError, ValueError):
+                continue
+
+            candidates.append(
+                CapitalCandidate(
+                    quote=value.row_text,
+                    page_number=page_number,
+                    document=document,
+                    offset=_table_offset(
+                        document=document,
+                        row_text=value.row_text,
+                    ),
+                    score=(
+                        document_priority(
+                            document,
+                            CAPITAL_DOCUMENT_PRIORITY,
+                        )
+                        + 70
+                        + TABLE_SCORE_BONUS
+                        + min(
+                            max(value.as_of.year - 2000, 0),
+                            40,
+                        )
+                    ),
+                    observation=observation,
+                )
+            )
+
+    return candidates
+
+
+def _historical_from_tables(
+    document: ExtractionDocument,
+) -> list[HistoricalCandidate]:
+    """Read the dated value series out of the tables of one document."""
+
+    candidates: list[HistoricalCandidate] = []
+
+    for page_number, table in document.document.iter_tables():
+        for value in iter_table_values(table):
+            if value.is_percentage or value.as_of is None or value.currency is None:
+                continue
+
+            normalized_label = normalize_search_text(value.label)
+
+            value_type = classify_historical_value(normalized_label)
+
+            if value_type is None:
+                continue
+
+            if describes_value_per_share(normalized_label):
+                # "Fondovy kapital na 1 akcii" measures one share, so the
+                # series it belongs to is the value of a share.
+                value_type = HistoricalValueType.NAV_PER_SHARE
+
+            if not _plausible_for_type(
+                value_type=value_type,
+                amount=value.value,
+            ):
+                continue
+
+            try:
+                observation = HistoricalValueObservation(
+                    as_of=value.as_of,
+                    value=value.value,
+                    currency=value.currency,
+                )
+            except ValidationError:
+                continue
+
+            candidates.append(
+                HistoricalCandidate(
+                    quote=value.row_text,
+                    page_number=page_number,
+                    document=document,
+                    offset=_table_offset(
+                        document=document,
+                        row_text=value.row_text,
+                    ),
+                    score=(
+                        document_priority(
+                            document,
+                            CAPITAL_DOCUMENT_PRIORITY,
+                        )
+                        + 70
+                        + TABLE_SCORE_BONUS
+                    ),
+                    value_type=value_type,
+                    share_class=share_class_code(value.label),
+                    currency=value.currency,
+                    observation=observation,
+                    context=normalize_search_text(value.row_text),
+                )
+            )
+
+    return candidates
+
+
+def _returns_from_tables(
+    document: ExtractionDocument,
+) -> list[ReturnCandidate]:
+    """
+    Read calendar-year performance out of a table with a year header.
+
+    A performance table writes the years across the top and the result of
+    each year underneath. Reading it as a grid keeps every result with
+    its own year instead of pairing whichever two numbers stand closest.
+    """
+
+    candidates: list[ReturnCandidate] = []
+
+    for page_number, table in document.document.iter_tables():
+        for value in iter_table_values(table):
+            if not value.is_percentage or value.year is None:
+                continue
+
+            if abs(value.value) > ANNUAL_RETURN_LIMIT_PERCENT:
+                continue
+
+            series_type = classify_return_series(
+                normalize_search_text(f"{value.label} {value.row_text}")
+            )
+
+            if series_type is None:
+                continue
+
+            try:
+                observation = AnnualReturnObservation(
+                    year=value.year,
+                    return_percent=value.value,
+                    series_type=series_type,
+                    share_class=share_class_code(value.label),
+                )
+            except ValidationError:
+                continue
+
+            candidates.append(
+                ReturnCandidate(
+                    quote=value.row_text,
+                    page_number=page_number,
+                    document=document,
+                    offset=_table_offset(
+                        document=document,
+                        row_text=value.row_text,
+                    ),
+                    score=(
+                        document_priority(
+                            document,
+                            RETURN_DOCUMENT_PRIORITY,
+                        )
+                        + 70
+                        + TABLE_SCORE_BONUS
+                        + (10 if series_type is ReturnSeriesType.CALENDAR_YEAR else 0)
+                    ),
+                    observation=observation,
+                )
+            )
+
+    return candidates
+
+
 def collect_capital_candidates(
     documents: list[ExtractionDocument],
 ) -> list[CapitalCandidate]:
@@ -664,6 +900,11 @@ def collect_capital_candidates(
     candidates: list[CapitalCandidate] = []
 
     for extraction_document in documents:
+        # A figure read out of a table keeps the label of its own row and
+        # the date of its own column, which no amount of window widening
+        # can recover once the grid has been flattened into a paragraph.
+        candidates.extend(_capital_from_tables(extraction_document))
+
         _, document_lines = normalized_document_lines(extraction_document)
 
         for index, (line, page_number, offset) in enumerate(document_lines):
@@ -925,6 +1166,8 @@ def collect_return_candidates(
     candidates: list[ReturnCandidate] = []
 
     for extraction_document in documents:
+        candidates.extend(_returns_from_tables(extraction_document))
+
         _, document_lines = normalized_document_lines(extraction_document)
 
         heading_series: ReturnSeriesType | None = None
@@ -1193,6 +1436,8 @@ def collect_historical_candidates(
     candidates: list[HistoricalCandidate] = []
 
     for extraction_document in documents:
+        candidates.extend(_historical_from_tables(extraction_document))
+
         _, document_lines = normalized_document_lines(extraction_document)
 
         heading_type: HistoricalValueType | None = None
@@ -1905,6 +2150,21 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
 
     record = best_candidate.document.record
 
+    review_required = confidence is Confidence.LOW or best_scope is SourceScope.SHARE_CLASS
+
+    # A series read from the layout fallback carries the same doubt as
+    # any other value taken from a rebuilt text: the rows were assembled
+    # from a page that was re-flowed, not read off it. The rule is the
+    # one applied to the delivered fields, kept here because this result
+    # is built without going through them.
+    if is_anydoc_parser(record.parser_name):
+        review_required = True
+
+        confidence = fallback_confidence(
+            confidence,
+            placed_on_a_page=best_candidate.page_number is not None,
+        )
+
     return FieldResult[ValueT](
         status=FieldStatus.FOUND,
         value=value,
@@ -1926,7 +2186,7 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
         extraction=ExtractionMetadata(
             method=ExtractionMethod.TABLE,
             confidence=confidence,
-            review_required=(confidence is Confidence.LOW or best_scope is SourceScope.SHARE_CLASS),
+            review_required=review_required,
         ),
     )
 

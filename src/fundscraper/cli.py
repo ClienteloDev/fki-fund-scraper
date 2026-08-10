@@ -85,6 +85,10 @@ from fundscraper.http_client import (
 )
 from fundscraper.input_loader import InputFileError, load_funds
 from fundscraper.normalization import canonical_domain, canonical_url
+from fundscraper.official_discovery import (
+    OfficialDiscoveryResult,
+    discover_official_sources,
+)
 from fundscraper.output_service import (
     OutputFileError,
     RetryMergeSummary,
@@ -139,9 +143,9 @@ def validate_input(
         )
         raise typer.Exit(code=1) from exc
 
-    domains = Counter(canonical_domain(fund.web) for fund in funds)
+    domains = Counter(canonical_domain(fund.web or "") for fund in funds)
 
-    canonical_urls = [canonical_url(fund.web) for fund in funds]
+    canonical_urls = [canonical_url(fund.web or "") for fund in funds if fund.web]
 
     unique_domains = len(domains)
     unique_urls = len(set(canonical_urls))
@@ -768,6 +772,187 @@ def crawl_fund_command(
             typer.echo(f"- {failure.stage}: {failure.url}: {failure.error_code}")
 
 
+@app.command("discover-official")
+def discover_official_command(
+    fund_name: Annotated[
+        str,
+        typer.Argument(
+            help="Exact fund name from funds.json.",
+        ),
+    ],
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="HTTP cache directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    max_pages: Annotated[
+        int,
+        typer.Option(
+            "--max-pages",
+            min=1,
+            max=100,
+            help="How many official pages may be fetched.",
+        ),
+    ] = 18,
+    max_documents: Annotated[
+        int,
+        typer.Option(
+            "--max-documents",
+            min=1,
+            max=200,
+        ),
+    ] = 60,
+    run_id: Annotated[
+        str,
+        typer.Option(
+            "--run-id",
+            help="Label separating this discovery run in the log.",
+        ),
+    ] = "",
+    show_rejected: Annotated[
+        bool,
+        typer.Option(
+            "--show-rejected",
+            help="Also print the links discovery refused.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore cached HTTP responses.",
+        ),
+    ] = False,
+) -> None:
+    """Explore the official sources of one fund without any fallback."""
+
+    result: OfficialDiscoveryResult
+
+    try:
+        funds = load_funds(input_path)
+
+        matching_funds = [fund for fund in funds if (fund.name.casefold() == fund_name.casefold())]
+
+        if not matching_funds:
+            typer.echo(
+                f"Fund was not found: {fund_name}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        fund = matching_funds[0]
+
+        initialize_database(database_path)
+
+        register_funds(
+            database_path,
+            funds,
+        )
+
+        settings = HttpSettings.from_environment()
+
+        async def run_discovery() -> OfficialDiscoveryResult:
+            async with HttpFetcher(
+                settings,
+                cache_directory,
+            ) as fetcher:
+                return await discover_official_sources(
+                    database_path=database_path,
+                    fund=fund,
+                    fetcher=fetcher,
+                    max_pages=max_pages,
+                    max_documents=max_documents,
+                    force=force,
+                    run_id=run_id,
+                )
+
+        result = asyncio.run(run_discovery())
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        FetchError,
+    ) as exc:
+        typer.echo(
+            f"Official discovery failed: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    metrics = result.metrics
+
+    typer.echo(f"Fund: {result.fund_name}")
+    typer.echo(f"Official domain: {result.official_domain}")
+    typer.echo(f"Pages inspected: {metrics.pages_inspected}")
+    typer.echo(f"Pages fetched: {metrics.pages_fetched}")
+    typer.echo(f"Sitemaps read: {metrics.sitemaps_read}")
+    typer.echo(f"Documents discovered: {metrics.documents_discovered}")
+    typer.echo(f"Documents accepted: {metrics.documents_accepted}")
+    typer.echo(f"Documents rejected: {metrics.documents_rejected}")
+    typer.echo(f"Official source hits: {metrics.official_source_hits}")
+    typer.echo(f"Official exploration complete: {result.is_exhausted}")
+    typer.echo(f"Official sources sufficient: {result.is_sufficient}")
+
+    if result.missing_document_groups:
+        typer.echo(f"Missing document groups: {', '.join(result.missing_document_groups)}")
+        typer.echo("A fallback adapter would still be allowed to run for this fund.")
+
+    typer.echo("Discovery methods:")
+
+    for method, occurrences in metrics.method_counts.items():
+        typer.echo(f"- {method}: {occurrences}")
+
+    typer.echo("")
+    typer.echo("Accepted documents:")
+
+    for index, document in enumerate(
+        result.documents[:25],
+        start=1,
+    ):
+        typer.echo(f"{index}. [{document.score}] {document.document_type.value}")
+        typer.echo(f"   {document.text or '-'}")
+        typer.echo(f"   {document.url}")
+
+    if show_rejected:
+        typer.echo("")
+        typer.echo("Rejected links:")
+
+        for entry in result.entries:
+            if entry.accepted:
+                continue
+
+            typer.echo(f"- [{entry.priority_score}] {entry.rejection_reason}: {entry.url}")
+
+    if result.warnings:
+        typer.echo("")
+        typer.echo("Warnings:")
+
+        for warning in result.warnings[:20]:
+            typer.echo(f"- {warning}")
+
+
 @app.command("parse-fund-documents")
 def parse_fund_documents_command(
     fund_name: Annotated[
@@ -810,6 +995,16 @@ def parse_fund_documents_command(
             help="Parse sources already marked as parsed again.",
         ),
     ] = False,
+    anydoc_fallback: Annotated[
+        bool,
+        typer.Option(
+            "--anydoc-fallback",
+            help=(
+                "Read PDFs whose layout defeated the parser a second time "
+                "with AnyDoc, and keep that reading only when it is better."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Convert downloaded fund documents into normalized text."""
 
@@ -849,6 +1044,7 @@ def parse_fund_documents_command(
                 fund=fund,
                 parsed_directory=parsed_directory,
                 force=force,
+                allow_anydoc_fallback=anydoc_fallback,
             )
         )
     except (
@@ -868,6 +1064,16 @@ def parse_fund_documents_command(
     typer.echo(f"Scanned PDF candidates: {summary.scanned_candidates}")
     typer.echo(f"Extracted characters: {summary.total_characters}")
     typer.echo(f"Failures: {len(summary.failures)}")
+
+    if summary.anydoc_triggered:
+        typer.echo(
+            f"AnyDoc layout fallback: {summary.anydoc_triggered} triggered, "
+            f"{summary.anydoc_accepted} accepted, "
+            f"{summary.anydoc_rejected} rejected, "
+            f"{summary.anydoc_blocked} blocked, "
+            f"{summary.anydoc_failed} failed "
+            f"({summary.anydoc_seconds:.1f}s)"
+        )
 
     if summary.failures:
         typer.echo("")

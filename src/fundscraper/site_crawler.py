@@ -146,7 +146,7 @@ def discover_navigation_links(
         if canonical_url(resolved_url) == canonical_url(page_url):
             continue
 
-        visible_text = _anchor_text(node)
+        visible_text = anchor_text(node)
 
         normalized_text = normalize_search_text(visible_text)
 
@@ -215,7 +215,7 @@ def discover_navigation_links(
     )
 
 
-def _anchor_text(
+def anchor_text(
     node: Any,
 ) -> str:
     visible_text = node.text(

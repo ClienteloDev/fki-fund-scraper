@@ -18,6 +18,13 @@ dependencies = [
     "typer>=0.27.0",
 ]
 
+[project.optional-dependencies]
+# Experimental only. AnyDoc is benchmarked against the Step 6 parser by
+# scripts/benchmark_anydoc_parser.py; no pipeline stage depends on it.
+anydoc = [
+    "firecrawl-anydoc>=0.1.7",
+]
+
 [project.scripts]
 fundscraper = "fundscraper.cli:app"
 
@@ -72,5 +79,7 @@ files = ["src", "tests"]
 module = [
     "pymupdf",
     "pymupdf.*",
+    "anydoc",
+    "anydoc.*",
 ]
 ignore_missing_imports = true

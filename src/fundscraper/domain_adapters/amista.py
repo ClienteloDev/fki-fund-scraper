@@ -67,7 +67,7 @@ class AmistaAdapter:
         self._cached_entries: tuple[AmistaCatalogEntry, ...] | None = None
 
     def supports(self, fund: FundInput) -> bool:
-        return canonical_domain(fund.web) == AMISTA_DOMAIN
+        return canonical_domain(fund.web or "") == AMISTA_DOMAIN
 
     async def discover(
         self,

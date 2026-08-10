@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from pydantic import HttpUrl
 
+from fundscraper.anydoc_parser import is_anydoc_parser
 from fundscraper.database import ParsedDocumentRecord
 from fundscraper.document_parser import ParsedDocument
 from fundscraper.field_definitions import (
@@ -53,6 +54,7 @@ from fundscraper.output_models import (
     SourceMetadata,
     TargetReturnValue,
 )
+from fundscraper.table_extraction import iter_labelled_rows, leading_percentage
 
 NUMBER_PATTERN: Final = (
     r"\d{1,3}(?:[ .]\d{3})*(?:[,.]\d+)?"
@@ -1138,6 +1140,16 @@ def extract_fees(
     for extraction_document in documents:
         normalized_document, document_lines = normalized_document_lines(extraction_document)
 
+        # A fee table states the rate in the same row as the fee it
+        # belongs to. Read as a grid the pairing is certain; read as text
+        # it is a guess about which percentage stood nearest.
+        candidates.extend(
+            _fee_candidates_from_tables(
+                document=extraction_document,
+                normalized_document=normalized_document,
+            )
+        )
+
         boundaries = section_boundaries(normalized_document)
 
         # Fees are collected per fund section, so a manager page listing
@@ -1149,6 +1161,8 @@ def extract_fees(
 
         for line, page_number, offset in document_lines:
             normalized = normalize_search_text(line)
+
+            line_items: dict[FeeType, FeeItem] = {}
 
             for fee_type, keywords in FEE_KEYWORDS:
                 if not any(keyword in normalized for keyword in keywords):
@@ -1163,6 +1177,12 @@ def extract_fees(
                 if fee_item is None:
                     continue
 
+                line_items[fee_type] = fee_item
+
+            if is_collapsed_fee_line(line_items):
+                continue
+
+            for fee_type, fee_item in line_items.items():
                 key = (
                     page_number,
                     section_index(
@@ -1228,6 +1248,142 @@ def extract_fees(
             "or ongoing fee was found in the parsed public sources."
         ),
     )
+
+
+def is_collapsed_fee_line(
+    line_items: dict[FeeType, FeeItem],
+) -> bool:
+    """
+    Return whether one line handed a single rate to several kinds of fee.
+
+    A converter that merges a whole cost table into one row leaves every
+    fee label and one percentage on the same line. Read as text that line
+    looks like an entry fee, an exit fee and a performance fee all
+    charged at the rate that happened to come first, which is a wrong
+    value rather than a missing one. Rates that are all zero are left
+    alone: a table stating that nothing is charged really does repeat
+    itself.
+    """
+
+    if len(line_items) < 2:
+        return False
+
+    rates = [item.rate_percent for item in line_items.values()]
+
+    if any(rate is None for rate in rates):
+        return False
+
+    first = rates[0]
+
+    if not first:
+        return False
+
+    return all(rate == first for rate in rates)
+
+
+# What a fee read from a table row is worth above the same fee read from
+# a line of flattened text.
+FEE_TABLE_SCORE_BONUS: Final = 30
+
+
+def _fee_candidates_from_tables(
+    *,
+    document: ExtractionDocument,
+    normalized_document: str,
+) -> list[Candidate[FeeCollection]]:
+    """Read the fees stated by the rows of the tables of one document."""
+
+    candidates: list[Candidate[FeeCollection]] = []
+
+    for page_number, table in document.document.iter_tables():
+        items: dict[FeeType, FeeItem] = {}
+
+        quotes: list[str] = []
+
+        for row in iter_labelled_rows(table):
+            rate = next(
+                (
+                    found
+                    for cell in row.cells
+                    for found in [leading_percentage(cell)]
+                    if found is not None
+                ),
+                None,
+            )
+
+            if rate is None:
+                continue
+
+            normalized_label = normalize_search_text(row.label)
+
+            fee_type = next(
+                (
+                    candidate_type
+                    for candidate_type, keywords in FEE_KEYWORDS
+                    if any(keyword in normalized_label for keyword in keywords)
+                ),
+                None,
+            )
+
+            if fee_type is None or fee_type in items:
+                continue
+
+            if rate < 0 or rate > FEE_MAXIMUM_RATE_PERCENT:
+                continue
+
+            normalized_row = normalize_search_text(row.row_text)
+
+            items[fee_type] = FeeItem(
+                type=fee_type,
+                rate_percent=rate,
+                frequency=_fee_frequency(fee_type),
+                maximum=any(marker in normalized_row for marker in FEE_MAXIMUM_MARKERS),
+                basis=row.row_text,
+                condition=row.row_text,
+                tiers=_parse_fee_tiers(
+                    line=row.row_text,
+                    normalized=normalized_row,
+                ),
+            )
+
+            quotes.append(row.row_text)
+
+        if not items:
+            continue
+
+        quote = "\n".join(quotes)
+
+        needle = normalize_search_text(quote)[:60]
+
+        candidates.append(
+            Candidate(
+                value=FeeCollection(items=list(items.values())),
+                raw_value=quote,
+                quote=quote,
+                page_number=page_number,
+                document=document,
+                score=(
+                    document_priority(
+                        document,
+                        FEE_DOCUMENT_PRIORITY,
+                    )
+                    + 60
+                    + FEE_TABLE_SCORE_BONUS
+                    + min(
+                        len(items) * 10,
+                        40,
+                    )
+                ),
+                value_offset=max(normalized_document.find(needle), 0),
+            )
+        )
+
+    return candidates
+
+
+# A fee above this is a parsing artefact rather than a rate an investor
+# pays. The delivered audit uses the same bound.
+FEE_MAXIMUM_RATE_PERCENT: Final = 100.0
 
 
 def extract_aum(
@@ -2091,6 +2247,22 @@ def candidate_or_missing[ValueT](
 
     source_record = best_candidate.document.record
 
+    # A value read from the layout fallback was found in a text rebuilt
+    # from the page rather than read off it. Rebuilding puts words next
+    # to each other that were never adjacent, and a label can pick up a
+    # number that belonged to a different part of the page: a memorandum
+    # measured this way reported a construction progress of 75 % as a
+    # guaranteed minimum return. Every such value goes in front of a
+    # reviewer, and one that could not even be placed on a page, so that
+    # a reader cannot check it against the document, is worth less still.
+    if is_anydoc_parser(source_record.parser_name):
+        review_required = True
+
+        confidence = fallback_confidence(
+            confidence,
+            placed_on_a_page=best_candidate.page_number is not None,
+        )
+
     return FieldResult[ValueT](
         status=FieldStatus.FOUND,
         value=best_candidate.value,
@@ -2308,6 +2480,53 @@ def url_identifies_fund(
             return True
 
     return False
+
+
+def foreign_section_ratio(
+    *,
+    text: str,
+    fund_name: str,
+) -> float:
+    """
+    Return the share of a document that presents some fund other than this.
+
+    A value found inside such a span is refused, so this is what a
+    document is worth to the attribution rules. It is measured rather
+    than assumed because a reading that drops the running page header
+    loses the confirmation that ends each foreign span, which can turn
+    most of a document a fund published about itself into a section that
+    appears to belong to somebody else.
+    """
+
+    if not text:
+        return 0.0
+
+    fund_tokens = fund_identity_tokens(fund_name)
+
+    if not fund_tokens:
+        return 0.0
+
+    spans = _foreign_sections(
+        text=text,
+        fund_tokens=fund_tokens,
+    )
+
+    if not spans:
+        return 0.0
+
+    covered = 0
+
+    highest_end = 0
+
+    for start, end in sorted(spans):
+        if end <= highest_end:
+            continue
+
+        covered += end - max(start, highest_end)
+
+        highest_end = end
+
+    return covered / len(text)
 
 
 def _foreign_sections(
@@ -2888,3 +3107,19 @@ def confidence_from_score(
         return Confidence.MEDIUM
 
     return Confidence.LOW
+
+
+def fallback_confidence(
+    confidence: Confidence,
+    *,
+    placed_on_a_page: bool,
+) -> Confidence:
+    """Return what a value read from a rebuilt text is worth."""
+
+    if not placed_on_a_page:
+        return Confidence.LOW
+
+    if confidence is Confidence.HIGH:
+        return Confidence.MEDIUM
+
+    return confidence

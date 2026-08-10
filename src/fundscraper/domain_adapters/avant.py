@@ -138,7 +138,7 @@ class AvantFundsAdapter:
         self,
         fund: FundInput,
     ) -> bool:
-        domain = canonical_domain(fund.web)
+        domain = canonical_domain(fund.web or "")
 
         if domain == AVANT_DOMAIN:
             return True
@@ -283,7 +283,7 @@ class AvantFundsAdapter:
 
         navigation_urls_result = tuple(sorted(navigation_by_url.values()))
 
-        if canonical_domain(fund.web) != AVANT_DOMAIN:
+        if canonical_domain(fund.web or "") != AVANT_DOMAIN:
             # The official external website is handled by the generic
             # crawler. AVANT provides documents only.
             navigation_urls_result = ()
