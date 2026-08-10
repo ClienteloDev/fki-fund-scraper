@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-
 FIELD_NAMES = (
     "investment_horizon",
     "minimum_investment",

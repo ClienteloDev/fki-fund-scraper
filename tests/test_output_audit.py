@@ -171,7 +171,9 @@ def test_detects_year_captured_as_target_return() -> None:
         ),
     )
 
-    assert outcome.status is AuditStatus.SUSPICIOUS
+    # A calendar year is not an unusual return, it is not a return at
+    # all, so the value is refused rather than only doubted.
+    assert outcome.status is AuditStatus.REJECTED
     assert "year_captured_as_percentage" in reason_codes(outcome)
 
 

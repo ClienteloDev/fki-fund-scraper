@@ -1,5 +1,5 @@
 """
-Validation rules of the extended fund data set.
+Validation rules of the fund data set.
 
 Every rule here names one way in which a value can be wrong while still
 being well formed. A series of two different metrics validates against
@@ -8,57 +8,175 @@ a news item of a neighbouring fund is a perfectly good article. Only a
 rule that knows what the value is supposed to mean can reject them.
 
 The rules are pure: they read a value and return findings. The extraction
-uses them to refuse a defective series, and the audit uses the same rules
-to explain a delivered one, so both agree on what "wrong" means.
+uses them to refuse a defective value, and the audit uses the same rules
+to explain a delivered one, so both agree on what "wrong" means. There is
+one vocabulary of reason codes, ``ValidationCode``, and one severity
+scale, and every consumer reports in them.
+
+Step 4 widened the module from the extended fields to every delivered
+field, and added the specification each field is checked against, the
+traceability rules a found value must satisfy, and the cross-field rules
+that only make sense once a whole fund record is in hand.
 """
 
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from typing import Final
+from urllib.parse import urlsplit
 
 from fundscraper.field_definitions import NON_FUND_CAPITAL_METRICS
 from fundscraper.html_discovery import normalize_search_text
 from fundscraper.normalization import canonical_domain
 from fundscraper.output_models import (
     AnnualReturnObservation,
+    AssetsUnderManagementValue,
     AumMetricType,
     CapitalObservation,
+    Confidence,
     FeeItem,
     FundNewsItem,
+    FundParty,
     HistoricalValueSeries,
+    HistoricalValueType,
+    InvestmentHorizonValue,
     MinimumInvestmentValue,
     NewsSourceType,
+    PartyRole,
     ReturnSeriesType,
+    ReturnType,
+    ScopeType,
     TargetReturnValue,
     ValueOrigin,
 )
 
 
 class ValidationCode(StrEnum):
-    """Why one extended value cannot be trusted as it stands."""
+    """
+    Why one value cannot be trusted as it stands.
 
+    The string of every member is the reason code written into the audit
+    report. The members added after a code was already delivered keep the
+    string it was delivered under, so a report of an earlier run and a
+    report of this one can be compared line by line.
+    """
+
+    # Provenance. A value that cannot be traced is kept, but a reader
+    # has no way of checking it.
+    MISSING_SOURCE = "missing_source"
+    MISSING_SOURCE_DATE = "missing_source_date"
+    MISSING_EVIDENCE = "missing_evidence"
+    MISSING_PAGE_REFERENCE = "missing_page_reference"
+    EVIDENCE_DOES_NOT_SUPPORT_VALUE = "evidence_does_not_support_value"
+    SCOPE_MISMATCH = "scope_mismatch"
+    THIRD_PARTY_SOURCE = "third_party_source"
+    SOURCE_SHARED_ACROSS_FUNDS = "source_shared_across_funds"
+    SOURCE_DOES_NOT_NAME_THE_FUND = "source_does_not_name_the_fund"
+
+    # Shape. The value is present but incomplete.
+    MISSING_VALUE_COMPONENT = "missing_value_component"
+    MISSING_CURRENCY = "missing_currency"
+    MISSING_AS_OF_DATE = "missing_as_of_date"
+    MALFORMED_VALUE = "malformed_value"
+    UNSUPPORTED_CURRENCY = "unsupported_currency"
+
+    # Investment horizon.
+    IMPLAUSIBLE_HORIZON = "implausible_horizon"
+    CALENDAR_YEAR_AS_HORIZON = "calendar_year_as_horizon"
+
+    # Minimum investment.
+    ZERO_MINIMUM_INVESTMENT = "zero_minimum_investment"
+    IMPLAUSIBLY_SMALL_MINIMUM_INVESTMENT = "implausibly_small_minimum_investment"
+    BELOW_QUALIFIED_INVESTOR_THRESHOLD = "below_qualified_investor_threshold"
+    NON_ROUND_MINIMUM_INVESTMENT = "non_round_minimum_investment"
+    INFERRED_MINIMUM_WITHOUT_BASIS = "inferred_minimum_without_basis"
+    STATUTORY_CAPITAL_AS_MINIMUM_INVESTMENT = "statutory_capital_as_minimum_investment"
+    PERCENTAGE_AS_MINIMUM_INVESTMENT = "percentage_as_minimum_investment"
+
+    # Target return.
+    ZERO_TARGET_RETURN = "zero_target_return"
+    IMPLAUSIBLE_TARGET_RETURN = "implausible_target_return"
+    UNUSUALLY_HIGH_TARGET_RETURN = "unusually_high_target_return"
+    YEAR_CAPTURED_AS_PERCENTAGE = "year_captured_as_percentage"
+    INVERTED_TARGET_RETURN_RANGE = "inverted_target_return_range"
+    COLLAPSED_TARGET_RETURN_RANGE = "collapsed_target_return_range"
+    KID_SCENARIO_AS_TARGET_RETURN = "kid_performance_scenario_as_target"
+    UNRELATED_PERCENTAGE_AS_TARGET_RETURN = "unrelated_percentage_as_target_return"
+    HISTORICAL_RETURN_AS_TARGET_RETURN = "historical_return_as_target_return"
+
+    # Fees.
+    COLLAPSED_FEE_RANGE = "collapsed_fee_range"
+    IMPLAUSIBLE_FEE_RATE = "implausible_fee_rate"
+    UNUSUALLY_HIGH_FEE_RATE = "unusually_high_fee_rate"
+    FEE_AMOUNT_RATE_MISMATCH = "fee_amount_rate_mismatch"
+    ZERO_FEE_WITHOUT_EVIDENCE = "zero_fee_without_evidence"
+    ZERO_FEE_FROM_A_RANGE = "zero_fee_from_a_range"
+    ZERO_FEE_NOT_SUPPORTED_BY_SOURCE = "zero_fee_not_supported_by_source"
+    VALUE_NOT_PRESENT_IN_EVIDENCE = "value_not_present_in_evidence"
+    VALUE_FAR_FROM_FEE_LABEL = "value_far_from_fee_label"
+    PERCENTAGE_DESCRIBES_INCOME_SHARE = "percentage_describes_income_share"
+    MAXIMUM_FLAG_CONTRADICTS_SOURCE = "maximum_flag_contradicts_source"
+
+    # Assets under management and capital series.
+    STATUTORY_CAPITAL_AS_AUM = "statutory_capital_as_aum"
+    MANAGER_AUM_AS_FUND_AUM = "manager_aum_as_fund_aum"
+    PER_SHARE_VALUE_AS_AUM = "per_share_value_as_aum"
+    IMPLAUSIBLY_SMALL_AUM = "implausibly_small_aum"
+    IMPLAUSIBLY_LARGE_AUM = "implausibly_large_aum"
+    IMPLAUSIBLE_AUM_AMOUNT = "implausible_aum_amount"
+    THOUSANDS_UNIT_NOT_APPLIED = "thousands_unit_not_applied"
+    AUM_VALUE_NOT_TIED_TO_LABEL = "aum_value_not_tied_to_label"
+    FUTURE_AS_OF_DATE = "future_as_of_date"
+    STALE_AS_OF_DATE = "stale_as_of_date"
+
+    # Series consistency.
     MIXED_METRICS_IN_SERIES = "mixed_metrics_in_series"
     MIXED_SHARE_CLASSES_IN_SERIES = "mixed_share_classes_in_series"
     DUPLICATE_DATES_IN_SERIES = "duplicate_dates_in_series"
+    MIXED_CURRENCIES_IN_SERIES = "mixed_currencies_in_series"
+
+    # Annual returns.
     CONFLICTING_ANNUAL_RETURNS = "conflicting_annual_returns"
     CUMULATIVE_AS_ANNUAL_RETURN = "cumulative_as_annual_return"
     KID_SCENARIO_AS_ANNUAL_RETURN = "kid_scenario_as_annual_return"
-    STATUTORY_CAPITAL_AS_AUM = "statutory_capital_as_aum"
-    MANAGER_AUM_AS_FUND_AUM = "manager_aum_as_fund_aum"
+
+    # Parties.
+    PARTY_NAME_NOT_SPECIFIC = "party_name_not_specific"
+    PARTY_ROLE_MISMATCH = "party_role_mismatch"
+    PARTY_IS_THE_FUND_ITSELF = "party_is_the_fund_itself"
+    MALFORMED_REGISTRATION_NUMBER = "malformed_registration_number"
+
+    # News.
     NEWS_OF_ANOTHER_FUND = "news_of_another_fund"
-    INFERRED_MINIMUM_WITHOUT_BASIS = "inferred_minimum_without_basis"
-    COLLAPSED_FEE_RANGE = "collapsed_fee_range"
+    NEWS_WITHOUT_DATE = "news_without_date"
+    NEWS_FROM_UNOFFICIAL_SOURCE = "news_from_unofficial_source"
+
+    # Cross-field.
+    CONFLICTING_VALUES = "conflicting_values"
+
+    # Fallback parser.
+    FALLBACK_PARSER_REVIEW_REQUIRED = "fallback_parser_review_required"
 
 
 class ValidationSeverity(StrEnum):
-    """Whether a finding refuses a value or only marks it for review."""
+    """
+    What a finding does to the value it describes.
 
-    REJECT = "reject"
+    ``REVIEW`` keeps the value and asks a human to look at it. ``CONFLICT``
+    and ``REJECT`` both refuse it, and the difference is why: a conflict
+    means two sources say different things and neither can be preferred,
+    a rejection means the value means something other than the field it
+    was written into.
+    """
+
     REVIEW = "review"
+    CONFLICT = "conflict"
+    REJECT = "reject"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +184,166 @@ class ValidationFinding:
     code: ValidationCode
     severity: ValidationSeverity
     detail: str
+
+    # Which delivered field a reviewer has to open. A rule that checks
+    # one field leaves it empty, because the field is already known; a
+    # cross-field rule names the weaker of the two it compared.
+    subject: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Calibrated thresholds
+#
+# Every number below was chosen after reading the distribution of the
+# 341-fund output in data/output/funds.full.json, not from a guess about
+# what a fund ought to look like.
+# ---------------------------------------------------------------------------
+
+
+# The delivered horizons run from one to ten years. Thirty years is well
+# beyond the longest closed-end Czech qualified investor fund and still
+# leaves every real value untouched.
+HORIZON_MAXIMUM_YEARS: Final = 30.0
+
+YEAR_LIKE_MINIMUM: Final = 1_900.0
+YEAR_LIKE_MAXIMUM: Final = 2_100.0
+
+
+# Czech qualified investor funds have a legal entry threshold of
+# 1 000 000 CZK, or 125 000 EUR together with a suitability assessment
+# (ZISIF). Values far below that are almost always a parsing artefact,
+# such as a nominal share price or a unit value.
+MINIMUM_INVESTMENT_IMPLAUSIBLE: Final[dict[str, float]] = {
+    "CZK": 1_000.0,
+    "EUR": 100.0,
+    "USD": 100.0,
+}
+
+MINIMUM_INVESTMENT_BELOW_THRESHOLD: Final[dict[str, float]] = {
+    "CZK": 100_000.0,
+    "EUR": 5_000.0,
+    "USD": 5_000.0,
+}
+
+
+# The statutory minimum fund capital of a Czech qualified investor fund.
+# Read as a subscription minimum it turns the floor the law puts under
+# the fund into the amount an investor has to bring.
+STATUTORY_FUND_CAPITAL: Final[dict[str, tuple[float, ...]]] = {
+    "EUR": (1_250_000.0,),
+    "CZK": (32_000_000.0,),
+}
+
+
+STATUTORY_CAPITAL_MARKERS: Final[tuple[str, ...]] = (
+    "zakladni kapital",
+    "minimalni vyse fondoveho kapitalu",
+    "nejnizsi pripustna vyse fondoveho kapitalu",
+    "zapisovany zakladni kapital",
+)
+
+
+# Delivered target returns cluster between 4 and 15 per cent a year.
+# Above 25 the figure is usually a cumulative result, a model calculation
+# or a share of something that is not a return at all.
+TARGET_RETURN_HIGH: Final = 25.0
+TARGET_RETURN_IMPLAUSIBLE: Final = 100.0
+TARGET_RETURN_KID_SUSPICIOUS: Final = 15.0
+
+
+# Wording proving a percentage measures something other than a return.
+# Kept deliberately narrow: every marker was read in a real quote of the
+# delivered output before it was added, and generic ones such as "LTV"
+# were dropped because they appear next to genuine targets.
+UNRELATED_PERCENTAGE_MARKERS: Final[tuple[str, ...]] = (
+    "obsazenost",
+    "obsazenosti",
+    "zaplnenost",
+    "pronajato",
+    "rozestaven",
+    "dokoncenost",
+    "dokonceno",
+    "stavebni pripravenost",
+    "postaveno",
+    "podil na hlasovacich pravech",
+    "vlastnicky podil",
+    "podilem ve spolecnosti",
+    "of its own capital",
+    "modeloveho zisku",
+    "modelovy zisk",
+    "occupancy",
+    "completion rate",
+)
+
+
+# Wording of a key information document that reports a projection or a
+# cost impact rather than what the fund aims for.
+KID_SCENARIO_MARKERS: Final[tuple[str, ...]] = (
+    "vnitrni vynosnost",
+    "irr",
+    "scenar",
+    "stresovy",
+    "nepriznivy",
+    "priznivy",
+    "umerny",
+    "performance scenario",
+    "moderate scenario",
+    "unfavourable",
+)
+
+
+# Wording of an achieved result. A past return is only a target when the
+# fund says so, and none of these say so.
+HISTORICAL_RETURN_MARKERS: Final[tuple[str, ...]] = (
+    "zhodnoceni v roce",
+    "vykonnost v roce",
+    "vykonnost fondu v roce",
+    "historicka vykonnost",
+    "dosazene zhodnoceni",
+    "zhodnoceni za rok",
+    "past performance",
+    "historical performance",
+)
+
+
+# Manual review of the delivered data showed that high exit and
+# performance fees are genuine in Czech qualified investor funds, for
+# example a 95 per cent exit fee during the investment period or a 45 per
+# cent performance fee above a hurdle. Only the fee types that are
+# capped in practice are checked against a magnitude threshold.
+FEE_RATE_IMPLAUSIBLE: Final = 100.0
+
+FEE_RATE_HIGH_BY_TYPE: Final[dict[str, float]] = {
+    "entry": 10.0,
+    "management": 10.0,
+    "administration": 10.0,
+    "depositary": 10.0,
+    "ongoing": 15.0,
+    "transaction": 15.0,
+}
+
+
+# A fund's capital is never a handful of crowns. A capital figure below
+# this bound is a per-share value: the delivered output holds net-asset
+# series of 0.09 CZK and NAV series of 0.86 CZK, which are unit prices
+# read into a fund-level series.
+PER_SHARE_VALUE_LIMIT: Final = 1_000.0
+
+
+# A fund of any size holds far more than this. Smaller reported assets
+# almost always mean a thousands unit of a Czech annual report was not
+# applied, because those statements are published "v tis. Kc".
+AUM_IMPLAUSIBLE_AMOUNT: Final = 1_000_000.0
+
+
+# The whole Czech qualified investor sector is worth a few hundred
+# billion crowns, and the largest single fund in the delivered output
+# holds six billion. Half a trillion in one fund is a multiplier applied
+# twice, as in the 4.4 trillion CZK read for one industrial fund.
+AUM_IMPLAUSIBLY_LARGE_AMOUNT: Final = 500_000_000_000.0
+
+
+AUM_MAXIMUM_AGE_DAYS: Final = 5 * 365
 
 
 # A calendar-year return of a qualified investor fund lies well inside
@@ -79,6 +357,1138 @@ PLAUSIBLE_ANNUAL_RETURN_LIMIT: Final = 60.0
 ANNUAL_RETURN_TOLERANCE: Final = 0.05
 
 
+# Two capital figures of the same date may be rounded differently by the
+# report that carries them. A wider gap means they measure two things.
+AUM_AGREEMENT_TOLERANCE: Final = 0.01
+
+
+# The currencies the delivered fields may use. Everything else is a
+# parsing artefact of a symbol table rather than a real denomination.
+ACCEPTED_CURRENCIES: Final[frozenset[str]] = frozenset({"CZK", "EUR", "USD"})
+
+
+# ---------------------------------------------------------------------------
+# Field specifications
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class FieldSpecification:
+    """
+    What one delivered field is allowed to contain.
+
+    The specification is data rather than code so that the audit can
+    publish it next to its findings: a reader of the report sees the rule
+    a value was measured against, not only that it failed.
+    """
+
+    field: str
+    value_kind: str
+    unit: str | None = None
+    currencies: tuple[str, ...] = ()
+    minimum: float | None = None
+    maximum: float | None = None
+    requires_as_of_date: bool = False
+    requires_source: bool = True
+    requires_evidence: bool = True
+    requires_page_in_paginated_sources: bool = True
+    accepted_scopes: tuple[ScopeType, ...] = (
+        ScopeType.FUND,
+        ScopeType.SUBFUND,
+        ScopeType.SHARE_CLASS,
+    )
+    hard_reject: tuple[ValidationCode, ...] = ()
+    review_only: tuple[ValidationCode, ...] = ()
+    notes: str = ""
+
+
+FIELD_SPECIFICATIONS: Final[dict[str, FieldSpecification]] = {
+    "investment_horizon": FieldSpecification(
+        field="investment_horizon",
+        value_kind="duration",
+        unit="years",
+        minimum=0.0,
+        maximum=HORIZON_MAXIMUM_YEARS,
+        hard_reject=(ValidationCode.CALENDAR_YEAR_AS_HORIZON,),
+        review_only=(ValidationCode.IMPLAUSIBLE_HORIZON,),
+        notes=(
+            "A duration in years, read from a recommended holding period. "
+            "A calendar year or a date is never a horizon."
+        ),
+    ),
+    "minimum_investment": FieldSpecification(
+        field="minimum_investment",
+        value_kind="money",
+        unit="currency amount",
+        currencies=tuple(sorted(ACCEPTED_CURRENCIES)),
+        minimum=0.0,
+        hard_reject=(
+            ValidationCode.INFERRED_MINIMUM_WITHOUT_BASIS,
+            ValidationCode.STATUTORY_CAPITAL_AS_MINIMUM_INVESTMENT,
+            ValidationCode.PERCENTAGE_AS_MINIMUM_INVESTMENT,
+        ),
+        review_only=(
+            ValidationCode.ZERO_MINIMUM_INVESTMENT,
+            ValidationCode.IMPLAUSIBLY_SMALL_MINIMUM_INVESTMENT,
+            ValidationCode.BELOW_QUALIFIED_INVESTOR_THRESHOLD,
+            ValidationCode.NON_ROUND_MINIMUM_INVESTMENT,
+        ),
+        notes=(
+            "A subscription amount in a currency. Never a percentage, a "
+            "share price, a unit value or the statutory fund capital. An "
+            "inferred value must carry the provision it rests on."
+        ),
+    ),
+    "target_return": FieldSpecification(
+        field="target_return",
+        value_kind="rate",
+        unit="per cent a year",
+        minimum=0.0,
+        maximum=TARGET_RETURN_IMPLAUSIBLE,
+        hard_reject=(
+            ValidationCode.KID_SCENARIO_AS_TARGET_RETURN,
+            ValidationCode.UNRELATED_PERCENTAGE_AS_TARGET_RETURN,
+            ValidationCode.HISTORICAL_RETURN_AS_TARGET_RETURN,
+            ValidationCode.YEAR_CAPTURED_AS_PERCENTAGE,
+        ),
+        review_only=(
+            ValidationCode.UNUSUALLY_HIGH_TARGET_RETURN,
+            ValidationCode.IMPLAUSIBLE_TARGET_RETURN,
+            ValidationCode.ZERO_TARGET_RETURN,
+            ValidationCode.COLLAPSED_TARGET_RETURN_RANGE,
+        ),
+        notes=(
+            "A return concept the fund states about the future: expected, "
+            "target, preferred, hurdle, guaranteed minimum, a range, or "
+            "explicitly not published. The distinction between them is "
+            "kept. An achieved result, a KID scenario, an occupancy or an "
+            "ownership share is not a target return."
+        ),
+    ),
+    "fees": FieldSpecification(
+        field="fees",
+        value_kind="collection",
+        unit="per cent or currency amount",
+        currencies=tuple(sorted(ACCEPTED_CURRENCIES)),
+        minimum=0.0,
+        review_only=(
+            ValidationCode.COLLAPSED_FEE_RANGE,
+            ValidationCode.IMPLAUSIBLE_FEE_RATE,
+            ValidationCode.UNUSUALLY_HIGH_FEE_RATE,
+            ValidationCode.FEE_AMOUNT_RATE_MISMATCH,
+            ValidationCode.MISSING_CURRENCY,
+        ),
+        notes=(
+            "One item per fee type, each either a rate or a fixed amount "
+            "with its currency. Tiers and ranges are preserved; a table "
+            "row collapsed onto several fee types is refused."
+        ),
+    ),
+    "assets_under_management": FieldSpecification(
+        field="assets_under_management",
+        value_kind="money",
+        unit="currency amount",
+        currencies=tuple(sorted(ACCEPTED_CURRENCIES)),
+        minimum=AUM_IMPLAUSIBLE_AMOUNT,
+        maximum=AUM_IMPLAUSIBLY_LARGE_AMOUNT,
+        requires_as_of_date=True,
+        hard_reject=(
+            ValidationCode.MANAGER_AUM_AS_FUND_AUM,
+            ValidationCode.STATUTORY_CAPITAL_AS_AUM,
+        ),
+        review_only=(
+            ValidationCode.PER_SHARE_VALUE_AS_AUM,
+            ValidationCode.IMPLAUSIBLY_SMALL_AUM,
+            ValidationCode.IMPLAUSIBLY_LARGE_AUM,
+            ValidationCode.THOUSANDS_UNIT_NOT_APPLIED,
+            ValidationCode.STALE_AS_OF_DATE,
+            ValidationCode.FUTURE_AS_OF_DATE,
+        ),
+        notes=(
+            "The assets of this fund or subfund on a stated date. Never "
+            "the assets of the manager, the registered or statutory "
+            "capital, or a value per investment share."
+        ),
+    ),
+    "manager": FieldSpecification(
+        field="manager",
+        value_kind="party",
+        requires_page_in_paginated_sources=True,
+        accepted_scopes=(
+            ScopeType.FUND,
+            ScopeType.SUBFUND,
+            ScopeType.SHARE_CLASS,
+            ScopeType.MANAGER,
+        ),
+        hard_reject=(ValidationCode.PARTY_ROLE_MISMATCH,),
+        review_only=(
+            ValidationCode.PARTY_NAME_NOT_SPECIFIC,
+            ValidationCode.PARTY_IS_THE_FUND_ITSELF,
+            ValidationCode.MALFORMED_REGISTRATION_NUMBER,
+        ),
+        notes=(
+            "The company that manages the fund (obhospodarovatel). A "
+            "legal form on its own, a sentence fragment or the fund "
+            "itself is not a manager."
+        ),
+    ),
+    "administrator": FieldSpecification(
+        field="administrator",
+        value_kind="party",
+        accepted_scopes=(
+            ScopeType.FUND,
+            ScopeType.SUBFUND,
+            ScopeType.SHARE_CLASS,
+            ScopeType.MANAGER,
+        ),
+        hard_reject=(ValidationCode.PARTY_ROLE_MISMATCH,),
+        review_only=(
+            ValidationCode.PARTY_NAME_NOT_SPECIFIC,
+            ValidationCode.PARTY_IS_THE_FUND_ITSELF,
+            ValidationCode.MALFORMED_REGISTRATION_NUMBER,
+        ),
+        notes=(
+            "The company that administers the fund (administrator). It is "
+            "often the same company as the manager, which is normal and "
+            "not a conflict, but the roles are never swapped."
+        ),
+    ),
+    "aum_history": FieldSpecification(
+        field="aum_history",
+        value_kind="series",
+        unit="currency amount",
+        currencies=tuple(sorted(ACCEPTED_CURRENCIES)),
+        requires_as_of_date=True,
+        hard_reject=(
+            ValidationCode.STATUTORY_CAPITAL_AS_AUM,
+            ValidationCode.MANAGER_AUM_AS_FUND_AUM,
+            ValidationCode.DUPLICATE_DATES_IN_SERIES,
+        ),
+        review_only=(
+            ValidationCode.PER_SHARE_VALUE_AS_AUM,
+            ValidationCode.IMPLAUSIBLE_AUM_AMOUNT,
+            ValidationCode.IMPLAUSIBLY_LARGE_AUM,
+            ValidationCode.MIXED_METRICS_IN_SERIES,
+        ),
+        notes=(
+            "Dated fund-level capital figures. Every observation carries "
+            "its metric, so a registered capital and a net asset value "
+            "are never added to the same line."
+        ),
+    ),
+    "annual_returns": FieldSpecification(
+        field="annual_returns",
+        value_kind="series",
+        unit="per cent",
+        requires_as_of_date=True,
+        hard_reject=(
+            ValidationCode.CUMULATIVE_AS_ANNUAL_RETURN,
+            ValidationCode.KID_SCENARIO_AS_ANNUAL_RETURN,
+            ValidationCode.DUPLICATE_DATES_IN_SERIES,
+        ),
+        review_only=(
+            ValidationCode.MIXED_METRICS_IN_SERIES,
+            ValidationCode.MIXED_SHARE_CLASSES_IN_SERIES,
+        ),
+        notes=(
+            "One observation per completed calendar year, each naming its "
+            "year and its share class. Year-to-date, rolling, cumulative "
+            "and annualized figures keep their own series type."
+        ),
+    ),
+    "historical_values": FieldSpecification(
+        field="historical_values",
+        value_kind="series",
+        currencies=tuple(sorted(ACCEPTED_CURRENCIES)),
+        requires_as_of_date=True,
+        hard_reject=(ValidationCode.DUPLICATE_DATES_IN_SERIES,),
+        review_only=(
+            ValidationCode.MIXED_METRICS_IN_SERIES,
+            ValidationCode.MIXED_SHARE_CLASSES_IN_SERIES,
+            ValidationCode.MIXED_CURRENCIES_IN_SERIES,
+            ValidationCode.PER_SHARE_VALUE_AS_AUM,
+        ),
+        notes=(
+            "One series per measured quantity, share class and currency. "
+            "A NAV per share, a fund capital and the assets under "
+            "management never share a series."
+        ),
+    ),
+    "news": FieldSpecification(
+        field="news",
+        value_kind="collection",
+        requires_page_in_paginated_sources=False,
+        accepted_scopes=(ScopeType.FUND, ScopeType.SUBFUND),
+        hard_reject=(ValidationCode.NEWS_OF_ANOTHER_FUND,),
+        review_only=(
+            ValidationCode.NEWS_WITHOUT_DATE,
+            ValidationCode.NEWS_FROM_UNOFFICIAL_SOURCE,
+        ),
+        notes=(
+            "Articles published by the fund or its manager about this "
+            "fund. Corporate news of the manager that never names the "
+            "fund is not fund news."
+        ),
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# Traceability
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ValueProvenance:
+    """What is known about where one delivered value came from."""
+
+    field: str
+    source_url: str | None = None
+    retrieved_at: str | None = None
+    quote: str | None = None
+    page: int | None = None
+    scope_type: str | None = None
+    confidence: str | None = None
+    review_required: bool | None = None
+
+    # The numbers a reader has to be able to find in the quote. An empty
+    # tuple means the value is not numeric and the check does not apply.
+    supporting_numbers: tuple[float, ...] = ()
+
+    # Whether the file this value comes from stores evidence at all. The
+    # reduced delivery schema has no place for a quote or a page, and
+    # reporting every one of its fields as unevidenced would say something
+    # about the schema rather than about the data.
+    evidence_available: bool = True
+
+
+def validate_provenance(
+    provenance: ValueProvenance,
+) -> list[ValidationFinding]:
+    """
+    Check that a found value can be traced back to what it was read from.
+
+    None of these findings refuses a value. An untraceable value may
+    still be the right one, and deleting it would lose information a
+    reviewer needs; what it loses is the right to be trusted unchecked.
+    """
+
+    specification = FIELD_SPECIFICATIONS.get(provenance.field)
+
+    findings: list[ValidationFinding] = []
+
+    if not provenance.source_url:
+        return [
+            ValidationFinding(
+                code=ValidationCode.MISSING_SOURCE,
+                severity=ValidationSeverity.REVIEW,
+                detail="A found value carries no source reference at all.",
+            )
+        ]
+
+    if not provenance.retrieved_at:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.MISSING_SOURCE_DATE,
+                severity=ValidationSeverity.REVIEW,
+                detail=("The source has no retrieval date, so the value cannot be aged."),
+            )
+        )
+
+    if not provenance.evidence_available:
+        return findings + _scope_findings(
+            provenance=provenance,
+            specification=specification,
+        )
+
+    if not (provenance.quote or "").strip():
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.MISSING_EVIDENCE,
+                severity=ValidationSeverity.REVIEW,
+                detail=("The value keeps no quoted source text, so nothing supports it."),
+            )
+        )
+    elif provenance.supporting_numbers and not any(
+        quote_supports_number(
+            quote=provenance.quote or "",
+            value=number,
+        )
+        for number in provenance.supporting_numbers
+    ):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.EVIDENCE_DOES_NOT_SUPPORT_VALUE,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    "None of the numbers of the value appears in the quoted "
+                    "source text, in any unit it could have been written in."
+                ),
+            )
+        )
+
+    # A page number is what lets a reader open the document and see the
+    # sentence. Inventing one for a web page would be worse than having
+    # none, so only a source that really has pages is required to name one.
+    if (
+        specification is not None
+        and specification.requires_page_in_paginated_sources
+        and provenance.page is None
+        and is_paginated_source(provenance.source_url)
+    ):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.MISSING_PAGE_REFERENCE,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    "The source is a paginated document and the value names "
+                    "no page, so the quote cannot be located in it."
+                ),
+            )
+        )
+
+    return findings + _scope_findings(
+        provenance=provenance,
+        specification=specification,
+    )
+
+
+def _scope_findings(
+    *,
+    provenance: ValueProvenance,
+    specification: FieldSpecification | None,
+) -> list[ValidationFinding]:
+    if specification is None or not provenance.scope_type:
+        return []
+
+    accepted = {scope.value for scope in specification.accepted_scopes}
+
+    if provenance.scope_type in accepted:
+        return []
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.SCOPE_MISMATCH,
+            severity=ValidationSeverity.REVIEW,
+            detail=(
+                f"The value is attributed to a {provenance.scope_type} "
+                f"scope, which {provenance.field} does not accept."
+            ),
+        )
+    ]
+
+
+def is_paginated_source(
+    url: str,
+) -> bool:
+    """Return whether a source is a document that has page numbers."""
+
+    path = urlsplit(url).path.casefold()
+
+    return path.endswith(".pdf")
+
+
+def quote_supports_number(
+    *,
+    quote: str,
+    value: float,
+) -> bool:
+    """
+    Return whether a quoted source text really contains one number.
+
+    A quote states "179 564 tis. Kc" for a value of 179 564 000, and
+    "3,645 mld. Kc" for 3 645 000 000. Comparing the digits alone would
+    call both unsupported, so every unit a Czech document writes amounts
+    in is tried, and a rounded presentation is accepted within half a
+    per cent of the value.
+    """
+
+    if value == 0:
+        return "0" in quote
+
+    present = _numbers_in(quote)
+
+    for scale in (1.0, 1e3, 1e6, 1e9, 1e-2, 1e2):
+        target = value / scale
+
+        for candidate in present:
+            if abs(candidate - target) <= abs(target) * 0.005:
+                return True
+
+    return False
+
+
+# The spaces a Czech document groups thousands with: an ordinary space,
+# a non-breaking one, a narrow one, a thin one and a figure space.
+_DIGIT_GROUP_SEPARATORS: Final = "     "
+
+_GROUPED_NUMBER_PATTERN: Final = re.compile(
+    r"(?<=\d)[" + _DIGIT_GROUP_SEPARATORS + r"](?=\d)",
+)
+
+_NUMBER_PATTERN: Final = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def _numbers_in(
+    text: str,
+) -> list[float]:
+    joined = _GROUPED_NUMBER_PATTERN.sub(
+        "",
+        text,
+    )
+
+    values: list[float] = []
+
+    for match in _NUMBER_PATTERN.finditer(joined):
+        try:
+            values.append(float(match.group().replace(",", ".")))
+        except ValueError:
+            continue
+
+    return values
+
+
+# ---------------------------------------------------------------------------
+# Base fields
+# ---------------------------------------------------------------------------
+
+
+def validate_investment_horizon(
+    value: InvestmentHorizonValue,
+) -> list[ValidationFinding]:
+    """Check that a recommended horizon is a duration and a realistic one."""
+
+    years = value.recommended_years
+
+    if YEAR_LIKE_MINIMUM <= years <= YEAR_LIKE_MAXIMUM:
+        return [
+            ValidationFinding(
+                code=ValidationCode.CALENDAR_YEAR_AS_HORIZON,
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    f"A horizon of {years:g} lies in the range of a calendar "
+                    "year, so a year was captured instead of a duration."
+                ),
+            )
+        ]
+
+    if years <= 0 or years > HORIZON_MAXIMUM_YEARS:
+        return [
+            ValidationFinding(
+                code=ValidationCode.IMPLAUSIBLE_HORIZON,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"A recommended horizon of {years:g} years is outside the "
+                    f"plausible range of 0 to {HORIZON_MAXIMUM_YEARS:g} years."
+                ),
+            )
+        ]
+
+    return []
+
+
+def validate_minimum_investment(
+    value: MinimumInvestmentValue,
+    *,
+    quote: str | None = None,
+) -> list[ValidationFinding]:
+    """Check that a minimum investment is a real subscription amount."""
+
+    findings: list[ValidationFinding] = []
+
+    findings.extend(_inference_findings(value))
+
+    if value.currency not in ACCEPTED_CURRENCIES:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.UNSUPPORTED_CURRENCY,
+                severity=ValidationSeverity.REVIEW,
+                detail=(f"{value.currency} is not a currency this data set reports amounts in."),
+            )
+        )
+
+    normalized_quote = normalize_search_text(quote or "")
+
+    amount = value.amount
+
+    if amount in STATUTORY_FUND_CAPITAL.get(value.currency, ()) and any(
+        marker in normalized_quote for marker in STATUTORY_CAPITAL_MARKERS
+    ):
+        findings.append(
+            ValidationFinding(
+                code=(ValidationCode.STATUTORY_CAPITAL_AS_MINIMUM_INVESTMENT),
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    f"{amount:,.0f} {value.currency} is the statutory fund "
+                    "capital named in the quoted text, not what an investor "
+                    "has to subscribe."
+                ),
+            )
+        )
+
+    if amount == 0:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.ZERO_MINIMUM_INVESTMENT,
+                severity=ValidationSeverity.REVIEW,
+                detail=("A minimum investment of zero cannot be a real subscription limit."),
+            )
+        )
+    elif amount < MINIMUM_INVESTMENT_IMPLAUSIBLE.get(
+        value.currency,
+        0.0,
+    ):
+        findings.append(
+            ValidationFinding(
+                code=(ValidationCode.IMPLAUSIBLY_SMALL_MINIMUM_INVESTMENT),
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"{amount:,.2f} {value.currency} is far below any realistic "
+                    "subscription and usually indicates a nominal share price, "
+                    "a unit value or a lost thousands multiplier."
+                ),
+            )
+        )
+    elif amount < MINIMUM_INVESTMENT_BELOW_THRESHOLD.get(
+        value.currency,
+        0.0,
+    ):
+        findings.append(
+            ValidationFinding(
+                code=(ValidationCode.BELOW_QUALIFIED_INVESTOR_THRESHOLD),
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"{amount:,.2f} {value.currency} is well below the "
+                    "qualified investor entry threshold, so it may describe a "
+                    "savings plan instalment or a different fee."
+                ),
+            )
+        )
+
+    if amount and amount != round(amount):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.NON_ROUND_MINIMUM_INVESTMENT,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"{amount:,.2f} {value.currency} is not a round "
+                    "subscription amount and looks like a unit price or an "
+                    "exchange rate."
+                ),
+            )
+        )
+
+    return findings
+
+
+def _inference_findings(
+    value: MinimumInvestmentValue,
+) -> list[ValidationFinding]:
+    """Check that an inferred minimum investment states its legal basis."""
+
+    if value.origin is not ValueOrigin.INFERRED:
+        return []
+
+    if value.inference is None:
+        return [
+            ValidationFinding(
+                code=ValidationCode.INFERRED_MINIMUM_WITHOUT_BASIS,
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    "The minimum investment was inferred rather than "
+                    "read from a source, and no legal basis is recorded."
+                ),
+            )
+        ]
+
+    if not value.inference.legal_basis.strip():
+        return [
+            ValidationFinding(
+                code=ValidationCode.INFERRED_MINIMUM_WITHOUT_BASIS,
+                severity=ValidationSeverity.REJECT,
+                detail="The recorded legal basis of the inference is empty.",
+            )
+        ]
+
+    return []
+
+
+def validate_target_return(
+    value: TargetReturnValue,
+    *,
+    quote: str | None = None,
+    source_url: str | None = None,
+) -> list[ValidationFinding]:
+    """
+    Check that a stated percentage really is a forward-looking return.
+
+    The wording around the number decides more than its size does. A
+    memorandum reporting a model profit of 41.84 per cent, a web page
+    writing "30 % of its own capital" under a target-return heading and
+    a key information document stating an internal rate of return are all
+    well-formed percentages that mean something else.
+    """
+
+    findings: list[ValidationFinding] = []
+
+    candidates = [
+        item
+        for item in (
+            value.value_percent_pa,
+            value.minimum_percent_pa,
+            value.maximum_percent_pa,
+        )
+        if item is not None
+    ]
+
+    if not candidates:
+        return [
+            ValidationFinding(
+                code=ValidationCode.MISSING_VALUE_COMPONENT,
+                severity=ValidationSeverity.REVIEW,
+                detail=("The target return contains neither an exact value nor a range."),
+            )
+        ]
+
+    if (
+        value.minimum_percent_pa is not None
+        and value.maximum_percent_pa is not None
+        and value.value_percent_pa is not None
+    ):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.COLLAPSED_TARGET_RETURN_RANGE,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    "The return carries both a range and a single value, "
+                    "so a reader cannot tell which one the fund states."
+                ),
+            )
+        )
+
+    if (
+        value.minimum_percent_pa is not None
+        and value.maximum_percent_pa is not None
+        and value.minimum_percent_pa > value.maximum_percent_pa
+    ):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.INVERTED_TARGET_RETURN_RANGE,
+                severity=ValidationSeverity.CONFLICT,
+                detail=(
+                    f"The range minimum {value.minimum_percent_pa:g} % exceeds "
+                    f"the maximum {value.maximum_percent_pa:g} %."
+                ),
+            )
+        )
+
+    normalized_quote = normalize_search_text(quote or "")
+
+    findings.extend(
+        _target_return_wording_findings(
+            normalized_quote=normalized_quote,
+            source_url=source_url,
+            highest=max(candidates),
+            return_type=value.return_type,
+        )
+    )
+
+    findings.extend(_target_return_magnitude_findings(candidates))
+
+    return findings
+
+
+def _target_return_wording_findings(
+    *,
+    normalized_quote: str,
+    source_url: str | None,
+    highest: float,
+    return_type: ReturnType,
+) -> list[ValidationFinding]:
+    findings: list[ValidationFinding] = []
+
+    unrelated = [marker for marker in UNRELATED_PERCENTAGE_MARKERS if marker in normalized_quote]
+
+    if unrelated:
+        findings.append(
+            ValidationFinding(
+                code=(ValidationCode.UNRELATED_PERCENTAGE_AS_TARGET_RETURN),
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    "The quoted text measures something that is not a return "
+                    f"({', '.join(unrelated)}), so the percentage is not a "
+                    "target return."
+                ),
+            )
+        )
+
+    historical = [marker for marker in HISTORICAL_RETURN_MARKERS if marker in normalized_quote]
+
+    if historical and return_type not in {
+        ReturnType.TARGET,
+        ReturnType.EXPECTED,
+        ReturnType.PREFERRED,
+        ReturnType.HURDLE,
+        ReturnType.GUARANTEED_MINIMUM,
+    }:
+        findings.append(
+            ValidationFinding(
+                code=(ValidationCode.HISTORICAL_RETURN_AS_TARGET_RETURN),
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    "The quoted text reports an achieved result "
+                    f"({', '.join(historical)}) and the value is not stated "
+                    "as a target, expected, preferred, hurdle or guaranteed "
+                    "return."
+                ),
+            )
+        )
+
+    scenario = [marker for marker in KID_SCENARIO_MARKERS if marker in normalized_quote]
+
+    from_kid = source_url is not None and _url_states_a_kid(source_url)
+
+    if scenario and (from_kid or highest > TARGET_RETURN_KID_SUSPICIOUS):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.KID_SCENARIO_AS_TARGET_RETURN,
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    "The quoted text is a performance scenario or a cost "
+                    f"impact of a key information document ({', '.join(scenario)}), "
+                    "which is a projection and not a target."
+                ),
+            )
+        )
+    elif from_kid and highest > TARGET_RETURN_KID_SUSPICIOUS:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.KID_SCENARIO_AS_TARGET_RETURN,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    "The value comes from a key information document and is "
+                    "high enough to be a performance scenario."
+                ),
+            )
+        )
+
+    return findings
+
+
+def _target_return_magnitude_findings(
+    candidates: Sequence[float],
+) -> list[ValidationFinding]:
+    highest = max(candidates)
+
+    if any(YEAR_LIKE_MINIMUM <= item <= YEAR_LIKE_MAXIMUM for item in candidates):
+        return [
+            ValidationFinding(
+                code=ValidationCode.YEAR_CAPTURED_AS_PERCENTAGE,
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    "The value lies in the range of a calendar year, so a year "
+                    "was captured instead of a percentage."
+                ),
+            )
+        ]
+
+    if highest > TARGET_RETURN_IMPLAUSIBLE:
+        return [
+            ValidationFinding(
+                code=ValidationCode.IMPLAUSIBLE_TARGET_RETURN,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"A target return of {highest:g} % a year exceeds any realistic fund target."
+                ),
+            )
+        ]
+
+    if highest > TARGET_RETURN_HIGH:
+        return [
+            ValidationFinding(
+                code=ValidationCode.UNUSUALLY_HIGH_TARGET_RETURN,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"{highest:g} % a year is far above the usual band of "
+                    "Czech qualified investor funds and may be a cumulative "
+                    "or historical performance rather than a target."
+                ),
+            )
+        ]
+
+    if len(candidates) == 1 and candidates[0] == 0:
+        return [
+            ValidationFinding(
+                code=ValidationCode.ZERO_TARGET_RETURN,
+                severity=ValidationSeverity.REVIEW,
+                detail="A target return of zero is not a meaningful fund target.",
+            )
+        ]
+
+    return []
+
+
+_KID_URL_MARKERS: Final[tuple[str, ...]] = (
+    "kid",
+    "priips",
+    "kiid",
+    "sdeleni-klicovych",
+    "sdeleni_klicovych",
+)
+
+
+def _url_states_a_kid(
+    url: str,
+) -> bool:
+    normalized = normalize_search_text(url)
+
+    return any(marker in normalized for marker in _KID_URL_MARKERS)
+
+
+def validate_assets_under_management(
+    value: AssetsUnderManagementValue,
+    *,
+    today: date,
+) -> list[ValidationFinding]:
+    """Check that a delivered assets figure describes this fund's assets."""
+
+    findings: list[ValidationFinding] = []
+
+    if value.currency not in ACCEPTED_CURRENCIES:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.UNSUPPORTED_CURRENCY,
+                severity=ValidationSeverity.REVIEW,
+                detail=(f"{value.currency} is not a currency this data set reports amounts in."),
+            )
+        )
+
+    findings.extend(
+        _capital_metric_findings(
+            metric_type=value.metric_type,
+            subject="value",
+        )
+    )
+
+    findings.extend(
+        _capital_magnitude_findings(
+            amount=value.amount,
+            currency=value.currency,
+            metric_type=value.metric_type,
+            label="The value",
+        )
+    )
+
+    findings.extend(
+        _as_of_findings(
+            as_of=value.as_of,
+            today=today,
+        )
+    )
+
+    return findings
+
+
+def _capital_metric_findings(
+    *,
+    metric_type: AumMetricType,
+    subject: str,
+) -> list[ValidationFinding]:
+    if metric_type is AumMetricType.MANAGER_AUM:
+        return [
+            ValidationFinding(
+                code=ValidationCode.MANAGER_AUM_AS_FUND_AUM,
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    f"The {subject} reports assets of the manager or the "
+                    "group, which are not the assets of this fund."
+                ),
+            )
+        ]
+
+    if metric_type is AumMetricType.STATUTORY_MINIMUM_CAPITAL:
+        return [
+            ValidationFinding(
+                code=ValidationCode.STATUTORY_CAPITAL_AS_AUM,
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    f"The {subject} reports the statutory minimum capital, "
+                    "which is the floor the law requires and not what the "
+                    "fund holds."
+                ),
+            )
+        ]
+
+    if metric_type is AumMetricType.REGISTERED_CAPITAL:
+        return [
+            ValidationFinding(
+                code=ValidationCode.STATUTORY_CAPITAL_AS_AUM,
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    f"The {subject} reports the registered capital of the "
+                    "fund, which is a fixed founding amount and not its "
+                    "assets under management."
+                ),
+            )
+        ]
+
+    return []
+
+
+def _capital_magnitude_findings(
+    *,
+    amount: float,
+    currency: str,
+    metric_type: AumMetricType,
+    label: str,
+) -> list[ValidationFinding]:
+    if metric_type in NON_FUND_CAPITAL_METRICS:
+        return []
+
+    if amount < PER_SHARE_VALUE_LIMIT:
+        return [
+            ValidationFinding(
+                code=ValidationCode.PER_SHARE_VALUE_AS_AUM,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"{label} is {amount:,.4g} {currency}, which is the value "
+                    "of a single investment share rather than the capital of "
+                    "a fund."
+                ),
+            )
+        ]
+
+    if amount < AUM_IMPLAUSIBLE_AMOUNT:
+        return [
+            ValidationFinding(
+                code=ValidationCode.IMPLAUSIBLY_SMALL_AUM,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"{label} is {amount:,.0f} {currency}, far below what a "
+                    "fund of this kind holds. Czech statements report amounts "
+                    "in thousands, so the multiplier was probably lost."
+                ),
+            )
+        ]
+
+    if amount > AUM_IMPLAUSIBLY_LARGE_AMOUNT:
+        return [
+            ValidationFinding(
+                code=ValidationCode.IMPLAUSIBLY_LARGE_AUM,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"{label} is {amount:,.0f} {currency}, larger than the "
+                    "whole Czech qualified investor sector, so a unit "
+                    "multiplier was probably applied twice."
+                ),
+            )
+        ]
+
+    return []
+
+
+def _as_of_findings(
+    *,
+    as_of: date,
+    today: date,
+) -> list[ValidationFinding]:
+    if as_of > today:
+        return [
+            ValidationFinding(
+                code=ValidationCode.FUTURE_AS_OF_DATE,
+                severity=ValidationSeverity.REVIEW,
+                detail=(f"The reporting date {as_of.isoformat()} lies in the future."),
+            )
+        ]
+
+    if (today - as_of).days > AUM_MAXIMUM_AGE_DAYS:
+        return [
+            ValidationFinding(
+                code=ValidationCode.STALE_AS_OF_DATE,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The reporting date {as_of.isoformat()} is older than "
+                    "five years, so the value is outdated."
+                ),
+            )
+        ]
+
+    return []
+
+
+def validate_party(
+    *,
+    party: FundParty,
+    expected_role: PartyRole,
+    fund_name: str,
+) -> list[ValidationFinding]:
+    """Check that a manager or administrator names a real company."""
+
+    # Imported here because the field definitions import nothing from
+    # this module and a top-level import would still be a cycle risk as
+    # the vocabulary grows.
+    from fundscraper.field_definitions import is_generic_company_name
+
+    findings: list[ValidationFinding] = []
+
+    name = party.name.strip()
+
+    if not name:
+        return [
+            ValidationFinding(
+                code=ValidationCode.MISSING_VALUE_COMPONENT,
+                severity=ValidationSeverity.REVIEW,
+                detail=f"The {expected_role.value} carries no company name.",
+            )
+        ]
+
+    if is_generic_company_name(name):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.PARTY_NAME_NOT_SPECIFIC,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The {expected_role.value} is stored as {name!r}, which "
+                    "is a legal form and names no company."
+                ),
+            )
+        )
+
+    if party.role is not expected_role:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.PARTY_ROLE_MISMATCH,
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    f"The {expected_role.value} field carries a party of role {party.role.value!r}."
+                ),
+            )
+        )
+
+    tokens = _distinctive_tokens(fund_name)
+
+    normalized_name = normalize_search_text(name)
+
+    if tokens and all(token in normalized_name for token in tokens):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.PARTY_IS_THE_FUND_ITSELF,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The {expected_role.value} repeats the name of the fund, "
+                    "so the company acting for it was not identified."
+                ),
+            )
+        )
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Extended fields
+# ---------------------------------------------------------------------------
+
+
 def validate_capital_observations(
     observations: Sequence[CapitalObservation],
 ) -> list[ValidationFinding]:
@@ -88,45 +1498,24 @@ def validate_capital_observations(
 
     metrics = {observation.metric_type for observation in observations}
 
-    statutory = sorted(
-        metric.value for metric in metrics if metric is AumMetricType.STATUTORY_MINIMUM_CAPITAL
-    )
-
-    if statutory:
-        findings.append(
-            ValidationFinding(
-                code=ValidationCode.STATUTORY_CAPITAL_AS_AUM,
-                severity=ValidationSeverity.REJECT,
-                detail=(
-                    "The series contains the statutory minimum capital, "
-                    "which is the floor the law requires and not what "
-                    "the fund holds."
-                ),
+    for metric in sorted(
+        metrics,
+        key=lambda item: item.value,
+    ):
+        findings.extend(
+            _capital_metric_findings(
+                metric_type=metric,
+                subject="series",
             )
         )
 
-    if AumMetricType.MANAGER_AUM in metrics:
-        findings.append(
-            ValidationFinding(
-                code=ValidationCode.MANAGER_AUM_AS_FUND_AUM,
-                severity=ValidationSeverity.REJECT,
-                detail=(
-                    "The series contains assets reported for the manager "
-                    "or the group, which are not the assets of this fund."
-                ),
-            )
-        )
-
-    if AumMetricType.REGISTERED_CAPITAL in metrics:
-        findings.append(
-            ValidationFinding(
-                code=ValidationCode.STATUTORY_CAPITAL_AS_AUM,
-                severity=ValidationSeverity.REJECT,
-                detail=(
-                    "The series contains the registered capital of the "
-                    "fund, which is a fixed founding amount and not its "
-                    "assets under management."
-                ),
+    for observation in observations:
+        findings.extend(
+            _capital_magnitude_findings(
+                amount=observation.amount,
+                currency=observation.currency,
+                metric_type=observation.metric_type,
+                label=(f"The observation of {observation.as_of.isoformat()}"),
             )
         )
 
@@ -145,7 +1534,7 @@ def validate_capital_observations(
         )
     )
 
-    return findings
+    return _collapse(findings)
 
 
 def validate_annual_returns(
@@ -221,12 +1610,31 @@ def validate_annual_returns(
         findings.append(
             ValidationFinding(
                 code=ValidationCode.CONFLICTING_ANNUAL_RETURNS,
-                severity=ValidationSeverity.REJECT,
+                severity=ValidationSeverity.CONFLICT,
                 detail=(
                     f"Year {year}"
                     + (f" of class {share_class}" if share_class else "")
                     + " is reported with different results: "
                     + ", ".join(f"{value:g} %" for value in sorted(values))
+                ),
+            )
+        )
+
+    classes = {
+        observation.share_class or ""
+        for observation in observations
+        if observation.series_type is ReturnSeriesType.CALENDAR_YEAR
+    }
+
+    if len(classes) > 1 and "" in classes:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.MIXED_SHARE_CLASSES_IN_SERIES,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    "Some annual results name a share class and some do not, "
+                    "so the unnamed ones may hold the results of a class they "
+                    "do not identify."
                 ),
             )
         )
@@ -249,7 +1657,7 @@ def validate_annual_returns(
                 )
             )
 
-    return findings
+    return _collapse(findings)
 
 
 def validate_historical_series(
@@ -284,8 +1692,12 @@ def validate_historical_series(
 
     by_type: dict[str, set[str]] = defaultdict(set)
 
+    currencies_by_type: dict[str, set[str]] = defaultdict(set)
+
     for item in series:
         by_type[item.value_type.value].add(item.share_class or "")
+
+        currencies_by_type[item.value_type.value].add(item.currency)
 
     for value_type, classes in sorted(by_type.items()):
         if len(classes) > 1 and "" in classes:
@@ -301,6 +1713,20 @@ def validate_historical_series(
                 )
             )
 
+    for value_type, currencies in sorted(currencies_by_type.items()):
+        if len(currencies) > 1:
+            findings.append(
+                ValidationFinding(
+                    code=ValidationCode.MIXED_CURRENCIES_IN_SERIES,
+                    severity=ValidationSeverity.REVIEW,
+                    detail=(
+                        f"The {value_type} series are reported in "
+                        f"{', '.join(sorted(currencies))}, so their values "
+                        "cannot be read as one history."
+                    ),
+                )
+            )
+
     for item in series:
         findings.extend(
             _duplicate_date_findings(
@@ -309,7 +1735,50 @@ def validate_historical_series(
             )
         )
 
-    return findings
+        findings.extend(_per_share_series_findings(item))
+
+    return _collapse(findings)
+
+
+# The series types that measure the fund as a whole. A value per share
+# read into one of them is the failure the audit has to name.
+_FUND_LEVEL_SERIES_TYPES: Final[frozenset[HistoricalValueType]] = frozenset(
+    {
+        HistoricalValueType.FUND_NET_ASSETS,
+        HistoricalValueType.FUND_CAPITAL,
+        HistoricalValueType.AUM,
+    }
+)
+
+
+def _per_share_series_findings(
+    series: HistoricalValueSeries,
+) -> list[ValidationFinding]:
+    if series.value_type not in _FUND_LEVEL_SERIES_TYPES:
+        return []
+
+    small = [
+        observation
+        for observation in series.observations
+        if observation.value < PER_SHARE_VALUE_LIMIT
+    ]
+
+    if not small:
+        return []
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.PER_SHARE_VALUE_AS_AUM,
+            severity=ValidationSeverity.REVIEW,
+            detail=(
+                f"The {series.value_type.value} series holds "
+                f"{len(small)} value(s) below "
+                f"{PER_SHARE_VALUE_LIMIT:,.0f} {series.currency}, such as "
+                f"{small[0].value:g}, which are values per investment share "
+                "rather than the capital of the fund."
+            ),
+        )
+    ]
 
 
 def validate_news_items(
@@ -326,7 +1795,12 @@ def validate_news_items(
 
     tokens = _distinctive_tokens(fund_name)
 
+    undated = 0
+
     for item in items:
+        if item.published_at is None:
+            undated += 1
+
         host = canonical_domain(str(item.url))
 
         if fund_host and host == fund_host:
@@ -335,7 +1809,7 @@ def validate_news_items(
         if item.source_type is NewsSourceType.THIRD_PARTY:
             findings.append(
                 ValidationFinding(
-                    code=ValidationCode.NEWS_OF_ANOTHER_FUND,
+                    code=ValidationCode.NEWS_FROM_UNOFFICIAL_SOURCE,
                     severity=ValidationSeverity.REVIEW,
                     detail=(
                         "The item comes from a third party, which this "
@@ -362,110 +1836,553 @@ def validate_news_items(
                 )
             )
 
-    return findings
-
-
-def validate_minimum_investment(
-    value: MinimumInvestmentValue,
-) -> list[ValidationFinding]:
-    """Check that an inferred minimum investment states its legal basis."""
-
-    if value.origin is not ValueOrigin.INFERRED:
-        return []
-
-    if value.inference is None:
-        return [
+    if undated:
+        findings.append(
             ValidationFinding(
-                code=ValidationCode.INFERRED_MINIMUM_WITHOUT_BASIS,
-                severity=ValidationSeverity.REJECT,
+                code=ValidationCode.NEWS_WITHOUT_DATE,
+                severity=ValidationSeverity.REVIEW,
                 detail=(
-                    "The minimum investment was inferred rather than "
-                    "read from a source, and no legal basis is recorded."
+                    f"{undated} of {len(items)} items carry no publication "
+                    "date, so their order and their age cannot be checked."
                 ),
             )
-        ]
+        )
 
-    if not value.inference.legal_basis.strip():
-        return [
-            ValidationFinding(
-                code=ValidationCode.INFERRED_MINIMUM_WITHOUT_BASIS,
-                severity=ValidationSeverity.REJECT,
-                detail="The recorded legal basis of the inference is empty.",
-            )
-        ]
-
-    return []
+    return findings
 
 
 def validate_fee_items(
     items: Sequence[FeeItem],
 ) -> list[ValidationFinding]:
-    """Check that a fee stated as a range still shows both of its bounds."""
+    """Check fee values, their units and the ranges they were read from."""
 
     findings: list[ValidationFinding] = []
 
     for item in items:
-        if item.minimum_rate_percent is None and item.maximum_rate_percent is None:
-            if _basis_states_a_range(item):
-                findings.append(
-                    ValidationFinding(
-                        code=ValidationCode.COLLAPSED_FEE_RANGE,
-                        severity=ValidationSeverity.REVIEW,
-                        detail=(
-                            f"The {item.type.value} fee is written as a "
-                            "range in its source, but only one number is "
-                            "stored."
-                        ),
-                    )
-                )
+        findings.extend(_fee_range_findings(item))
 
-            continue
+        findings.extend(_fee_magnitude_findings(item))
 
-        if (
-            item.rate_percent is not None
-            and item.maximum_rate_percent is not None
-            and item.minimum_rate_percent is not None
-            and item.minimum_rate_percent != item.maximum_rate_percent
-            and item.maximum is not True
-        ):
-            findings.append(
-                ValidationFinding(
-                    code=ValidationCode.COLLAPSED_FEE_RANGE,
-                    severity=ValidationSeverity.REVIEW,
-                    detail=(
-                        f"The {item.type.value} fee covers "
-                        f"{item.minimum_rate_percent:g} % to "
-                        f"{item.maximum_rate_percent:g} %, but its single "
-                        "rate is not marked as an upper limit."
-                    ),
-                )
-            )
+        findings.extend(_fee_unit_findings(item))
 
     return findings
 
 
-def validate_target_return(
-    value: TargetReturnValue,
+def _fee_range_findings(
+    item: FeeItem,
 ) -> list[ValidationFinding]:
-    """Check that a stated range kept both of its bounds."""
+    if item.minimum_rate_percent is None and item.maximum_rate_percent is None:
+        if _basis_states_a_range(item):
+            return [
+                ValidationFinding(
+                    code=ValidationCode.COLLAPSED_FEE_RANGE,
+                    severity=ValidationSeverity.REVIEW,
+                    detail=(
+                        f"The {item.type.value} fee is written as a "
+                        "range in its source, but only one number is stored."
+                    ),
+                )
+            ]
+
+        return []
 
     if (
-        value.minimum_percent_pa is not None
-        and value.maximum_percent_pa is not None
-        and value.value_percent_pa is not None
+        item.rate_percent is not None
+        and item.maximum_rate_percent is not None
+        and item.minimum_rate_percent is not None
+        and item.minimum_rate_percent != item.maximum_rate_percent
+        and item.maximum is not True
     ):
         return [
             ValidationFinding(
                 code=ValidationCode.COLLAPSED_FEE_RANGE,
                 severity=ValidationSeverity.REVIEW,
                 detail=(
-                    "The return carries both a range and a single value, "
-                    "so a reader cannot tell which one the fund states."
+                    f"The {item.type.value} fee covers "
+                    f"{item.minimum_rate_percent:g} % to "
+                    f"{item.maximum_rate_percent:g} %, but its single "
+                    "rate is not marked as an upper limit."
                 ),
             )
         ]
 
     return []
+
+
+def _fee_magnitude_findings(
+    item: FeeItem,
+) -> list[ValidationFinding]:
+    rate = item.rate_percent
+
+    if rate is None:
+        return []
+
+    if rate > FEE_RATE_IMPLAUSIBLE:
+        return [
+            ValidationFinding(
+                code=ValidationCode.IMPLAUSIBLE_FEE_RATE,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"A {item.type.value} fee of {rate:g} % is above 100 % "
+                    "and is probably an absolute amount captured as a "
+                    "percentage."
+                ),
+            )
+        ]
+
+    limit = FEE_RATE_HIGH_BY_TYPE.get(
+        item.type.value,
+        FEE_RATE_IMPLAUSIBLE,
+    )
+
+    if rate > limit:
+        return [
+            ValidationFinding(
+                code=ValidationCode.UNUSUALLY_HIGH_FEE_RATE,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"A {item.type.value} fee of {rate:g} % is far above the "
+                    "usual band for this fee type and may be a different "
+                    "figure of the source."
+                ),
+            )
+        ]
+
+    return []
+
+
+# A currency written straight after a number, proving the figure is an
+# amount and not a rate.
+_AMOUNT_UNIT_PATTERN: Final = re.compile(
+    r"(?P<number>\d+(?:[.,]\d+)?)\s*(?:kc|czk|eur|usd|€|\$)",
+)
+
+_RATE_UNIT_PATTERN: Final = re.compile(
+    r"(?P<number>\d+(?:[.,]\d+)?)\s*%",
+)
+
+
+def _fee_unit_findings(
+    item: FeeItem,
+) -> list[ValidationFinding]:
+    findings: list[ValidationFinding] = []
+
+    if item.fixed_amount is not None and item.currency is None:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.MISSING_CURRENCY,
+                severity=ValidationSeverity.REVIEW,
+                detail=(f"The {item.type.value} fee has a fixed amount without a currency."),
+            )
+        )
+
+    basis = normalize_search_text(
+        " ".join(
+            part
+            for part in (
+                item.basis,
+                item.condition,
+                item.details,
+            )
+            if part
+        )
+    )
+
+    if not basis:
+        return findings
+
+    if item.fixed_amount is not None and _written_with(
+        pattern=_RATE_UNIT_PATTERN,
+        basis=basis,
+        value=item.fixed_amount,
+    ):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.FEE_AMOUNT_RATE_MISMATCH,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The {item.type.value} fee stores {item.fixed_amount:g} "
+                    "as a fixed amount, but the source writes that number as "
+                    "a percentage."
+                ),
+            )
+        )
+
+    if (
+        item.rate_percent is not None
+        and item.rate_percent > 0
+        and _written_with(
+            pattern=_AMOUNT_UNIT_PATTERN,
+            basis=basis,
+            value=item.rate_percent,
+        )
+        and not _written_with(
+            pattern=_RATE_UNIT_PATTERN,
+            basis=basis,
+            value=item.rate_percent,
+        )
+    ):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.FEE_AMOUNT_RATE_MISMATCH,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The {item.type.value} fee stores {item.rate_percent:g} "
+                    "as a percentage, but the source writes that number as an "
+                    "amount in a currency."
+                ),
+            )
+        )
+
+    return findings
+
+
+def _written_with(
+    *,
+    pattern: re.Pattern[str],
+    basis: str,
+    value: float,
+) -> bool:
+    for match in pattern.finditer(basis):
+        try:
+            written = float(match.group("number").replace(",", "."))
+        except ValueError:
+            continue
+
+        if abs(written - value) < 1e-9:
+            return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Fallback parser
+# ---------------------------------------------------------------------------
+
+
+def fallback_extraction_metadata(
+    confidence: Confidence,
+    *,
+    placed_on_a_page: bool,
+) -> tuple[Confidence, bool]:
+    """
+    Return what a value read from a rebuilt text is worth, and its review flag.
+
+    This is the single place the rule is applied. ``validate_fallback_
+    extraction`` below states the same rule as a check, so a value that
+    reached the output another way is measured against it too.
+    """
+
+    if not placed_on_a_page:
+        return (
+            Confidence.LOW,
+            True,
+        )
+
+    if confidence is Confidence.HIGH:
+        return (
+            Confidence.MEDIUM,
+            True,
+        )
+
+    return (
+        confidence,
+        True,
+    )
+
+
+def validate_fallback_extraction(
+    *,
+    is_fallback: bool,
+    confidence: Confidence,
+    review_required: bool,
+    placed_on_a_page: bool,
+) -> list[ValidationFinding]:
+    """
+    Check the guarantees a value read from a rebuilt text has to carry.
+
+    The AnyDoc experiment produced values that were perfectly plausible
+    and simply wrong: a construction progress of 75 per cent read as a
+    guaranteed minimum return, a value per share read as the assets of
+    the fund. Rebuilding a page puts words next to each other that were
+    never adjacent, so nothing measured this way may be delivered as a
+    high-confidence value, and every such value goes in front of a
+    reviewer.
+    """
+
+    if not is_fallback:
+        return []
+
+    findings: list[ValidationFinding] = []
+
+    if not review_required:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.FALLBACK_PARSER_REVIEW_REQUIRED,
+                severity=ValidationSeverity.REVIEW,
+                detail=("A value read by the layout fallback is not marked for review."),
+            )
+        )
+
+    if confidence is Confidence.HIGH:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.FALLBACK_PARSER_REVIEW_REQUIRED,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    "A value read by the layout fallback is delivered with "
+                    "high confidence, which a rebuilt text cannot support."
+                ),
+            )
+        )
+
+    if not placed_on_a_page and confidence is not Confidence.LOW:
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.FALLBACK_PARSER_REVIEW_REQUIRED,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    "A value read by the layout fallback could not be placed "
+                    "on a page, so a reader cannot check it against the "
+                    "document, yet its confidence was not reduced."
+                ),
+            )
+        )
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Cross-field rules
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class FundRecordView:
+    """
+    The delivered values of one fund that the cross-field rules read.
+
+    Everything is optional: a rule that has nothing to compare simply
+    produces nothing. Only relationships that can be checked without
+    inventing a financial calculation are implemented.
+    """
+
+    fund_name: str = ""
+    assets_under_management: AssetsUnderManagementValue | None = None
+    aum_observations: tuple[CapitalObservation, ...] = ()
+    historical_series: tuple[HistoricalValueSeries, ...] = ()
+    annual_returns: tuple[AnnualReturnObservation, ...] = ()
+    target_return: TargetReturnValue | None = None
+    minimum_investment: MinimumInvestmentValue | None = None
+    manager: FundParty | None = None
+    administrator: FundParty | None = None
+    fees: tuple[FeeItem, ...] = ()
+
+
+def validate_cross_fields(
+    record: FundRecordView,
+) -> list[ValidationFinding]:
+    """Check the relations between the delivered fields of one fund."""
+
+    findings: list[ValidationFinding] = []
+
+    findings.extend(_aum_against_history(record))
+
+    findings.extend(_aum_against_per_share_values(record))
+
+    findings.extend(_target_return_against_history(record))
+
+    findings.extend(_party_roles(record))
+
+    return findings
+
+
+def _aum_against_history(
+    record: FundRecordView,
+) -> list[ValidationFinding]:
+    """Compare the delivered assets with the dated series of the same fund."""
+
+    value = record.assets_under_management
+
+    if value is None or not record.aum_observations:
+        return []
+
+    # Only the same metric of the same date in the same currency is
+    # comparable. Total assets and net assets of one day differ by the
+    # liabilities of the fund, and calling that a conflict would report
+    # arithmetic as an error.
+    same_date = [
+        observation
+        for observation in record.aum_observations
+        if observation.as_of == value.as_of
+        and observation.currency == value.currency
+        and observation.metric_type is value.metric_type
+        and observation.metric_type not in NON_FUND_CAPITAL_METRICS
+    ]
+
+    for observation in same_date:
+        larger = max(observation.amount, value.amount)
+
+        if larger == 0:
+            continue
+
+        if abs(observation.amount - value.amount) / larger <= AUM_AGREEMENT_TOLERANCE:
+            return []
+
+    if not same_date:
+        return []
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.CONFLICTING_VALUES,
+            severity=ValidationSeverity.CONFLICT,
+            detail=(
+                f"The delivered assets of {value.as_of.isoformat()} are "
+                f"{value.amount:,.0f} {value.currency}, while the capital "
+                "series reports "
+                + ", ".join(f"{item.amount:,.0f}" for item in same_date[:3])
+                + " for the same date."
+            ),
+            subject="assets_under_management",
+        )
+    ]
+
+
+def _aum_against_per_share_values(
+    record: FundRecordView,
+) -> list[ValidationFinding]:
+    """Check that the delivered assets are not a value per share."""
+
+    value = record.assets_under_management
+
+    if value is None:
+        return []
+
+    for series in record.historical_series:
+        if series.value_type not in {
+            HistoricalValueType.NAV_PER_SHARE,
+            HistoricalValueType.INVESTMENT_SHARE_VALUE,
+        }:
+            continue
+
+        for observation in series.observations:
+            if observation.currency != value.currency:
+                continue
+
+            if abs(observation.value - value.amount) < 1e-6:
+                return [
+                    ValidationFinding(
+                        code=ValidationCode.PER_SHARE_VALUE_AS_AUM,
+                        severity=ValidationSeverity.REJECT,
+                        detail=(
+                            f"The delivered assets equal the "
+                            f"{series.value_type.value} of "
+                            f"{observation.as_of.isoformat()}, so a value per "
+                            "investment share was reported as the assets of "
+                            "the fund."
+                        ),
+                        subject="assets_under_management",
+                    )
+                ]
+
+    return []
+
+
+def _target_return_against_history(
+    record: FundRecordView,
+) -> list[ValidationFinding]:
+    """Check that the target return is not a result the fund already had."""
+
+    value = record.target_return
+
+    if value is None or value.value_percent_pa is None:
+        return []
+
+    if value.return_type in {
+        ReturnType.RANGE,
+        ReturnType.NOT_PUBLISHED,
+    }:
+        return []
+
+    matching = [
+        observation
+        for observation in record.annual_returns
+        if observation.series_type is ReturnSeriesType.CALENDAR_YEAR
+        and abs(observation.return_percent - value.value_percent_pa) < 1e-6
+    ]
+
+    if not matching:
+        return []
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.HISTORICAL_RETURN_AS_TARGET_RETURN,
+            severity=ValidationSeverity.REVIEW,
+            detail=(
+                f"The stated {value.return_type.value} return of "
+                f"{value.value_percent_pa:g} % equals the achieved result of "
+                + ", ".join(str(item.year) for item in matching[:3])
+                + ", so a past performance may have been read as a target."
+            ),
+            subject="target_return",
+        )
+    ]
+
+
+def _party_roles(
+    record: FundRecordView,
+) -> list[ValidationFinding]:
+    """
+    Check that the manager and the administrator are told apart.
+
+    Czech investment companies routinely act as both, and forty of the
+    eighty-two funds that carry both parties name the same company twice.
+    That is correct and is not reported. What is reported is the same
+    company name under two different registration numbers, because then
+    one of the two was read from the wrong sentence.
+    """
+
+    manager = record.manager
+
+    administrator = record.administrator
+
+    if manager is None or administrator is None:
+        return []
+
+    if _company_key(manager.name) != _company_key(administrator.name):
+        return []
+
+    if manager.ico is None or administrator.ico is None:
+        return []
+
+    if manager.ico == administrator.ico:
+        return []
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.CONFLICTING_VALUES,
+            severity=ValidationSeverity.CONFLICT,
+            detail=(
+                f"The manager and the administrator are both {manager.name!r} "
+                f"but carry different registration numbers, {manager.ico} and "
+                f"{administrator.ico}."
+            ),
+            subject="administrator",
+        )
+    ]
+
+
+def _company_key(
+    name: str,
+) -> str:
+    """Return a company name reduced to what identifies it."""
+
+    return "".join(character for character in normalize_search_text(name) if character.isalnum())
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
 
 def rejects(
@@ -473,7 +2390,30 @@ def rejects(
 ) -> bool:
     """Return whether any finding refuses the value outright."""
 
-    return any(finding.severity is ValidationSeverity.REJECT for finding in findings)
+    return any(
+        finding.severity in {ValidationSeverity.REJECT, ValidationSeverity.CONFLICT}
+        for finding in findings
+    )
+
+
+def worst_severity(
+    findings: Iterable[ValidationFinding],
+) -> ValidationSeverity | None:
+    """Return the strongest severity among the findings, if there is one."""
+
+    ranked = sorted(
+        findings,
+        key=lambda finding: SEVERITY_RANK[finding.severity],
+    )
+
+    return ranked[-1].severity if ranked else None
+
+
+SEVERITY_RANK: Final[dict[ValidationSeverity, int]] = {
+    ValidationSeverity.REVIEW: 0,
+    ValidationSeverity.CONFLICT: 1,
+    ValidationSeverity.REJECT: 2,
+}
 
 
 def fund_level_capital(
@@ -498,6 +2438,28 @@ def calendar_year_returns(
         for observation in observations
         if observation.series_type is ReturnSeriesType.CALENDAR_YEAR
     ]
+
+
+def _collapse(
+    findings: Sequence[ValidationFinding],
+) -> list[ValidationFinding]:
+    """
+    Keep one finding per code, the strongest and first of its kind.
+
+    A series of twenty per-share observations states one defect, not
+    twenty, and a report that repeats it twenty times hides the other
+    nineteen problems of the fund.
+    """
+
+    best: dict[ValidationCode, ValidationFinding] = {}
+
+    for finding in findings:
+        current = best.get(finding.code)
+
+        if current is None or SEVERITY_RANK[finding.severity] > SEVERITY_RANK[current.severity]:
+            best[finding.code] = finding
+
+    return [finding for finding in findings if best.get(finding.code) is finding]
 
 
 def _duplicate_date_findings(

@@ -31,6 +31,7 @@ from fundscraper.anydoc_parser import is_anydoc_parser
 from fundscraper.extended_validation import (
     ValidationFinding,
     ValidationSeverity,
+    fallback_extraction_metadata,
     rejects,
     validate_annual_returns,
     validate_capital_observations,
@@ -78,7 +79,6 @@ from fundscraper.field_extraction import (
     declared_multiplier,
     document_priority,
     extract_date,
-    fallback_confidence,
     fund_identity_tokens,
     missing_result,
     normalize_currency,
@@ -2158,9 +2158,7 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
     # one applied to the delivered fields, kept here because this result
     # is built without going through them.
     if is_anydoc_parser(record.parser_name):
-        review_required = True
-
-        confidence = fallback_confidence(
+        confidence, review_required = fallback_extraction_metadata(
             confidence,
             placed_on_a_page=best_candidate.page_number is not None,
         )

@@ -14,6 +14,7 @@ from pydantic import HttpUrl
 from fundscraper.anydoc_parser import is_anydoc_parser
 from fundscraper.database import ParsedDocumentRecord
 from fundscraper.document_parser import ParsedDocument
+from fundscraper.extended_validation import fallback_extraction_metadata
 from fundscraper.field_definitions import (
     HOLDING_PERIOD_FROM_PATTERN,
     HOLDING_PERIOD_RANGE_PATTERN,
@@ -2256,9 +2257,7 @@ def candidate_or_missing[ValueT](
     # reviewer, and one that could not even be placed on a page, so that
     # a reader cannot check it against the document, is worth less still.
     if is_anydoc_parser(source_record.parser_name):
-        review_required = True
-
-        confidence = fallback_confidence(
+        confidence, review_required = fallback_extraction_metadata(
             confidence,
             placed_on_a_page=best_candidate.page_number is not None,
         )
@@ -3116,10 +3115,9 @@ def fallback_confidence(
 ) -> Confidence:
     """Return what a value read from a rebuilt text is worth."""
 
-    if not placed_on_a_page:
-        return Confidence.LOW
+    reduced, _ = fallback_extraction_metadata(
+        confidence,
+        placed_on_a_page=placed_on_a_page,
+    )
 
-    if confidence is Confidence.HIGH:
-        return Confidence.MEDIUM
-
-    return confidence
+    return reduced
