@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Hashable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date
 from html import unescape
@@ -28,6 +28,14 @@ from urllib.parse import SplitResult, urlsplit
 from pydantic import HttpUrl, ValidationError
 
 from fundscraper.anydoc_parser import is_anydoc_parser
+from fundscraper.conflict_resolution import (
+    CandidateFacts,
+    ConflictLedger,
+    company_key,
+    money_key,
+    number_key,
+    resolve_group,
+)
 from fundscraper.extended_validation import (
     ValidationFinding,
     ValidationSeverity,
@@ -73,6 +81,7 @@ from fundscraper.field_extraction import (
     Candidate,
     ExtractionDocument,
     SourceScope,
+    candidate_facts,
     candidate_or_missing,
     classify_source_scope,
     confidence_from_score,
@@ -239,6 +248,7 @@ def extract_extended_fields(
     fund_name: str,
     fund_web: str | None,
     documents: list[ExtractionDocument],
+    ledger: ConflictLedger | None = None,
 ) -> ExtendedFundFields:
     """Extract every field added in schema version 3 for one fund."""
 
@@ -247,23 +257,33 @@ def extract_extended_fields(
             fund_name=fund_name,
             documents=documents,
             role=PartyRole.MANAGER,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
         administrator=extract_party(
             fund_name=fund_name,
             documents=documents,
             role=PartyRole.ADMINISTRATOR,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
         aum_history=extract_aum_history(
             fund_name=fund_name,
             documents=documents,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
         annual_returns=extract_annual_returns(
             fund_name=fund_name,
             documents=documents,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
         historical_values=extract_historical_values(
             fund_name=fund_name,
             documents=documents,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
         news=extract_fund_news(
             fund_name=fund_name,
@@ -386,6 +406,8 @@ def extract_party(
     fund_name: str,
     documents: list[ExtractionDocument],
     role: PartyRole,
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[FundParty]:
     """Extract the company acting for the fund in one role."""
 
@@ -486,26 +508,11 @@ def extract_party(
         # printed by some of the documents, so comparing it as well
         # reported one company as two conflicting values.
         detect_conflicts=True,
-        value_key=lambda value: _company_key(value.name),
-    )
-
-
-def _company_key(
-    name: str,
-) -> str:
-    """
-    Return a comparable form of a company name.
-
-    Documents of one manager write its legal form as "a.s.", "a. s." and
-    "a.s". Comparing the text verbatim reported the same company as two
-    conflicting values.
-    """
-
-    return "".join(
-        re.findall(
-            r"[a-z0-9]+",
-            normalize_search_text(name),
-        )
+        value_key=lambda value: company_key(value.name),
+        field=role.value,
+        fund_web=fund_web,
+        priorities=PARTY_DOCUMENT_PRIORITY,
+        ledger=ledger,
     )
 
 
@@ -620,6 +627,8 @@ def extract_aum_history(
     *,
     fund_name: str,
     documents: list[ExtractionDocument],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[AumHistory]:
     """Extract every dated fund-level capital figure of one fund."""
 
@@ -641,7 +650,7 @@ def extract_aum_history(
 
     return _series_result(
         fund_name=fund_name,
-        candidates=_best_per_capital_key(fund_level),
+        candidates=fund_level,
         documents=documents,
         build=lambda accepted: AumHistory(
             observations=[candidate.observation for candidate in accepted],
@@ -651,6 +660,16 @@ def extract_aum_history(
             "Dated fund-level capital figures were found, but none of "
             "them could be tied to this exact fund."
         ),
+        key_of=_capital_key,
+        value_of=lambda candidate: money_key(
+            amount=candidate.observation.amount,
+            currency=candidate.observation.currency,
+        ),
+        narrow=_best_per_capital_key,
+        field="aum_history",
+        priorities=CAPITAL_DOCUMENT_PRIORITY,
+        fund_web=fund_web,
+        ledger=ledger,
     )
 
 
@@ -1075,6 +1094,29 @@ def _declared_only(
     return declared or 1.0
 
 
+def _capital_key(
+    candidate: CapitalCandidate,
+) -> str:
+    """
+    Return what makes two capital figures claims about the same thing.
+
+    A different metric, a different day, a different class or a different
+    currency is a different figure of the same fund, and two of them
+    never contradict each other.
+    """
+
+    observation = candidate.observation
+
+    return "|".join(
+        (
+            observation.metric_type.value,
+            observation.as_of.isoformat(),
+            observation.share_class or "",
+            observation.currency,
+        )
+    )
+
+
 def _best_per_capital_key(
     candidates: list[CapitalCandidate],
 ) -> list[CapitalCandidate]:
@@ -1124,6 +1166,8 @@ def extract_annual_returns(
     *,
     fund_name: str,
     documents: list[ExtractionDocument],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[AnnualReturnHistory]:
     """Extract the calendar-year performance of one fund."""
 
@@ -1145,7 +1189,7 @@ def extract_annual_returns(
 
     return _series_result(
         fund_name=fund_name,
-        candidates=_best_per_return_key(calendar),
+        candidates=calendar,
         documents=documents,
         build=lambda accepted: AnnualReturnHistory(
             observations=[candidate.observation for candidate in accepted],
@@ -1155,6 +1199,13 @@ def extract_annual_returns(
             "Calendar-year performance figures were found, but none of "
             "them could be tied to this exact fund."
         ),
+        key_of=_return_key,
+        value_of=lambda candidate: number_key(candidate.observation.return_percent),
+        narrow=_best_per_return_key,
+        field="annual_returns",
+        priorities=RETURN_DOCUMENT_PRIORITY,
+        fund_web=fund_web,
+        ledger=ledger,
     )
 
 
@@ -1365,6 +1416,22 @@ def _signed_percentages(
         )
 
 
+def _return_key(
+    candidate: ReturnCandidate,
+) -> str:
+    """Return the year, period and class one performance figure covers."""
+
+    observation = candidate.observation
+
+    return "|".join(
+        (
+            str(observation.year),
+            observation.series_type.value,
+            observation.share_class or "",
+        )
+    )
+
+
 def _best_per_return_key(
     candidates: list[ReturnCandidate],
 ) -> list[ReturnCandidate]:
@@ -1402,6 +1469,8 @@ def extract_historical_values(
     *,
     fund_name: str,
     documents: list[ExtractionDocument],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[HistoricalValueCollection]:
     """Extract the dated value series of one fund."""
 
@@ -1418,13 +1487,20 @@ def extract_historical_values(
 
     return _series_result(
         fund_name=fund_name,
-        candidates=_best_per_historical_key(candidates),
+        candidates=candidates,
         documents=documents,
         build=_build_historical_collection,
         validate=lambda value: validate_historical_series(value.series),
         unconfirmed_detail=(
             "Dated values were found, but none of them could be tied to this exact fund."
         ),
+        key_of=_historical_key,
+        value_of=lambda candidate: number_key(candidate.observation.value),
+        narrow=_best_per_historical_key,
+        field="historical_values",
+        priorities=CAPITAL_DOCUMENT_PRIORITY,
+        fund_web=fund_web,
+        ledger=ledger,
     )
 
 
@@ -1599,6 +1675,21 @@ def _plausible_for_type(
         return 0 < amount <= SHARE_VALUE_MAXIMUM
 
     return amount > 0
+
+
+def _historical_key(
+    candidate: HistoricalCandidate,
+) -> str:
+    """Return the quantity, class, currency and day one value describes."""
+
+    return "|".join(
+        (
+            candidate.value_type.value,
+            candidate.share_class or "",
+            candidate.currency,
+            candidate.observation.as_of.isoformat(),
+        )
+    )
 
 
 def _best_per_historical_key(
@@ -2078,6 +2169,15 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
         list[ValidationFinding],
     ],
     unconfirmed_detail: str,
+    # Step 8. Which observations claim the same thing, what they claim,
+    # and how the surviving ones are ordered and capped.
+    key_of: Callable[[CandidateT], str],
+    value_of: Callable[[CandidateT], Hashable],
+    narrow: Callable[[list[CandidateT]], list[CandidateT]],
+    field: str,
+    priorities: dict[DocumentType, int],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[ValueT]:
     """
     Confirm the scope of every observation and assemble the field.
@@ -2085,6 +2185,12 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
     Each observation runs through the same scope classification as a
     single value, so an observation taken from the section of another
     fund on a shared page never enters the series.
+
+    Observations describing the same date, class and metric are then
+    compared against each other. One of them enters the series when it is
+    clearly the stronger reading; when nothing separates them, neither
+    does, and the point is reported as an unresolved conflict instead of
+    the series silently keeping whichever scored higher.
     """
 
     accepted: list[tuple[CandidateT, SourceScope]] = []
@@ -2115,8 +2221,30 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
             detail=unconfirmed_detail,
         )
 
+    resolved, unresolved = _resolve_observations(
+        fund_name=fund_name,
+        fund_web=fund_web,
+        field=field,
+        accepted=accepted,
+        key_of=key_of,
+        value_of=value_of,
+        priorities=priorities,
+        ledger=ledger,
+    )
+
+    if not resolved:
+        return _unresolved_series_result(
+            candidates=candidates,
+            documents=documents,
+            unresolved=unresolved,
+        )
+
+    kept = narrow([candidate for candidate, _ in resolved])
+
+    scope_of = {id(candidate): scope for candidate, scope in resolved}
+
     best_candidate, best_scope = max(
-        accepted,
+        ((candidate, scope_of[id(candidate)]) for candidate in kept),
         key=lambda item: (
             item[0].score,
             item[0].document.record.source_id,
@@ -2124,7 +2252,7 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
     )
 
     try:
-        value = build([candidate for candidate, _ in accepted])
+        value = build(kept)
     except ValidationError:
         return _unconfirmed_series_result(
             candidates=candidates,
@@ -2163,6 +2291,12 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
             placed_on_a_page=best_candidate.page_number is not None,
         )
 
+    if unresolved:
+        # A point the sources could not agree on was left out. The series
+        # is still usable, and a reader has to know that a hole in it was
+        # a disagreement rather than an absence.
+        review_required = True
+
     return FieldResult[ValueT](
         status=FieldStatus.FOUND,
         value=value,
@@ -2185,6 +2319,161 @@ def _series_result[CandidateT: SeriesCandidate, ValueT](
             method=ExtractionMethod.TABLE,
             confidence=confidence,
             review_required=review_required,
+        ),
+        attempted_sources=_unresolved_attempts(unresolved),
+    )
+
+
+def _resolve_observations[CandidateT: SeriesCandidate](
+    *,
+    fund_name: str,
+    fund_web: str | None,
+    field: str,
+    accepted: Sequence[tuple[CandidateT, SourceScope]],
+    key_of: Callable[[CandidateT], str],
+    value_of: Callable[[CandidateT], Hashable],
+    priorities: dict[DocumentType, int],
+    ledger: ConflictLedger | None,
+) -> tuple[
+    list[tuple[CandidateT, SourceScope]],
+    list[tuple[CandidateT, str]],
+]:
+    """
+    Decide between observations that describe the same point of a series.
+
+    Returns the observations that may enter the series and, separately,
+    the ones whose sources contradicted each other without one of them
+    being clearly stronger.
+    """
+
+    grouped: dict[str, list[tuple[CandidateT, SourceScope]]] = {}
+
+    for item in accepted:
+        grouped.setdefault(
+            key_of(item[0]),
+            [],
+        ).append(item)
+
+    resolved: list[tuple[CandidateT, SourceScope]] = []
+
+    unresolved: list[tuple[CandidateT, str]] = []
+
+    for semantic_key, group in grouped.items():
+        resolution = resolve_group(
+            fund_name=fund_name,
+            field=field,
+            semantic_key=semantic_key,
+            items=group,
+            facts_of=_observation_facts(
+                fund_name=fund_name,
+                fund_web=fund_web,
+                priorities=priorities,
+                ledger=ledger,
+                value_of=value_of,
+            ),
+            value_key=lambda item: value_of(item[0]),
+        )
+
+        if ledger is not None and len(group) > 1:
+            ledger.record(resolution.record)
+
+        if resolution.selected is not None:
+            resolved.append(resolution.selected)
+
+            continue
+
+        unresolved.extend(
+            (
+                candidate,
+                semantic_key,
+            )
+            for candidate, _ in resolution.alternatives
+        )
+
+    return (
+        resolved,
+        unresolved,
+    )
+
+
+def _observation_facts[CandidateT: SeriesCandidate](
+    *,
+    fund_name: str,
+    fund_web: str | None,
+    priorities: dict[DocumentType, int],
+    ledger: ConflictLedger | None,
+    value_of: Callable[[CandidateT], Hashable],
+) -> Callable[[tuple[CandidateT, SourceScope]], CandidateFacts]:
+    """Return the reader that describes one observation to the resolver."""
+
+    def facts_of(
+        item: tuple[CandidateT, SourceScope],
+    ) -> CandidateFacts:
+        candidate, scope = item
+
+        return candidate_facts(
+            document=candidate.document,
+            quote=candidate.quote,
+            page_number=candidate.page_number,
+            score=candidate.score,
+            scope=scope,
+            fund_name=fund_name,
+            fund_web=fund_web,
+            priorities=priorities,
+            ledger=ledger,
+            display_value=str(value_of(candidate)),
+            raw_value=candidate.quote,
+        )
+
+    return facts_of
+
+
+def _unresolved_attempts[CandidateT: SeriesCandidate](
+    unresolved: Sequence[tuple[CandidateT, str]],
+) -> list[SourceAttempt]:
+    """Keep every observation that lost its point to a disagreement."""
+
+    return [
+        SourceAttempt(
+            url=HttpUrl(candidate.document.record.url),
+            retrieved_at=source_datetime(candidate.document.record),
+            outcome=ReasonCode.CONFLICTING_VALUES,
+            document_type=resolve_document_type(candidate.document.record.document_type),
+            detail=(
+                f"{semantic_key}: {candidate.quote[:200]} | left out because "
+                "the sources of this observation disagree and none is stronger"
+            )[:500],
+        )
+        for candidate, semantic_key in unresolved
+    ]
+
+
+def _unresolved_series_result[CandidateT: SeriesCandidate, ValueT](
+    *,
+    candidates: Sequence[CandidateT],
+    documents: list[ExtractionDocument],
+    unresolved: Sequence[tuple[CandidateT, str]],
+) -> FieldResult[ValueT]:
+    """Report a series whose every point was contested and undecidable."""
+
+    return FieldResult[ValueT](
+        status=FieldStatus.CONFLICTING,
+        reason=MissingReason(
+            code=ReasonCode.CONFLICTING_VALUES,
+            detail=(
+                "Every observation of the series is reported differently by "
+                "two sources of the same standing, so none of them could be "
+                "preferred automatically."
+            ),
+        ),
+        attempted_sources=(
+            _unresolved_attempts(unresolved)
+            or _series_attempts(
+                candidates=candidates,
+                documents=documents,
+                outcome=ReasonCode.CONFLICTING_VALUES,
+                detail="The sources of this series disagree.",
+            )
         ),
     )
 
