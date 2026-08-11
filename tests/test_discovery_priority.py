@@ -146,3 +146,50 @@ def test_generic_fund_words_are_not_distinctive() -> None:
     )
 
     assert distinctive_tokens("investiční fond SICAV, a.s.") == ()
+
+
+def test_a_wanted_document_type_outranks_an_unwanted_one_of_the_same_kind() -> None:
+    """
+    Field awareness is what makes the deep pass different from the fast one.
+
+    A fund whose assets are missing is sent out for annual reports, and
+    the report has to be fetched before the key information document the
+    fast pass already read.
+    """
+
+    annual = PrioritySignals(
+        url="https://www.examplefund.cz/dokumenty/vyrocni-zprava-2024.pdf",
+        anchor_text="Výroční zpráva 2024",
+        fund_name="Example Fund SICAV a.s.",
+        document_type=DocumentType.ANNUAL_REPORT,
+    )
+
+    plain = score_link(annual)
+
+    wanted = score_link(
+        annual,
+        wanted_document_types=frozenset({DocumentType.ANNUAL_REPORT}),
+    )
+
+    assert wanted.value > plain.value
+
+    assert any(reason.startswith("wanted_document_type:") for reason in wanted.reasons)
+
+    key_information = PrioritySignals(
+        url="https://www.examplefund.cz/dokumenty/sdeleni-klicovych-informaci.pdf",
+        anchor_text="Sdělení klíčových informací",
+        fund_name="Example Fund SICAV a.s.",
+        document_type=DocumentType.PRIIPS_KID,
+    )
+
+    # Without the bias the key information document ranks higher; with it
+    # the annual report does.
+    assert score_link(key_information).value > plain.value
+
+    assert (
+        wanted.value
+        > score_link(
+            key_information,
+            wanted_document_types=frozenset({DocumentType.ANNUAL_REPORT}),
+        ).value
+    )

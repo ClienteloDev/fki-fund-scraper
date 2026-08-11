@@ -310,8 +310,17 @@ def file_name_of(
     )
 
 
+# What a link is worth when it is one of the document types the pass was
+# sent out to find. It is large enough to lift a wanted document over an
+# unwanted one of the same standing, and small enough not to lift it over
+# a link that names the fund.
+WANTED_DOCUMENT_TYPE_BONUS: Final = 60
+
+
 def score_link(
     signals: PrioritySignals,
+    *,
+    wanted_document_types: frozenset[DocumentType] = frozenset(),
 ) -> PriorityScore:
     """
     Rank one link for official-source discovery.
@@ -320,6 +329,11 @@ def score_link(
     winner: a document keyword, a section keyword, the name of the fund
     and the type already detected each contribute, because a link that
     carries several of them is the one worth fetching first.
+
+    ``wanted_document_types`` is what makes the deep pass field-aware. A
+    fund whose assets are missing is sent out for annual reports and
+    financial statements, and those links are then fetched before the
+    key information document the fast pass already read.
     """
 
     text = searchable_text(signals)
@@ -398,6 +412,11 @@ def score_link(
         value += rank // 2
 
         reasons.append(f"document_type:{signals.document_type.value}")
+
+        if signals.document_type in wanted_document_types:
+            value += WANTED_DOCUMENT_TYPE_BONUS
+
+            reasons.append(f"wanted_document_type:{signals.document_type.value}")
 
     year = _latest_year(text)
 

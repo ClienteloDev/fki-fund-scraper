@@ -253,6 +253,10 @@ class OfficialDiscoveryResult:
     metrics: OfficialDiscoveryMetrics
     warnings: tuple[str, ...]
 
+    # The document types this pass was sent out to find, if any. They
+    # count towards sufficiency next to the groups every fund needs.
+    wanted_document_types: frozenset[DocumentType] = frozenset()
+
     @property
     def is_exhausted(self) -> bool:
         """
@@ -268,11 +272,25 @@ class OfficialDiscoveryResult:
 
     @property
     def missing_document_groups(self) -> tuple[str, ...]:
-        """Return the required document groups the official site lacks."""
+        """
+        Return the document groups and types the official site lacks.
+
+        A pass sent out for a particular field asks for every document
+        type that could answer it, and any one of them does. Listing
+        each unfound type separately would report a fund as short of
+        nine documents when the one it needed was found.
+        """
 
         found = {document.document_type for document in self.documents}
 
-        return tuple(name for name, accepted in REQUIRED_DOCUMENT_GROUPS if not (found & accepted))
+        missing = [name for name, accepted in REQUIRED_DOCUMENT_GROUPS if not (found & accepted)]
+
+        if self.wanted_document_types and not (found & self.wanted_document_types):
+            missing.append(
+                "wanted:" + "|".join(sorted(item.value for item in self.wanted_document_types))
+            )
+
+        return tuple(missing)
 
     @property
     def is_sufficient(self) -> bool:
@@ -297,8 +315,20 @@ async def discover_official_sources(
     force: bool = False,
     respect_robots: bool = True,
     run_id: str = "",
+    # Step 7. The document types this pass was sent out to find, and
+    # whether it may stop as soon as it holds a usable set.
+    wanted_document_types: frozenset[DocumentType] = frozenset(),
+    stop_when_sufficient: bool = False,
 ) -> OfficialDiscoveryResult:
-    """Explore the official site of one fund and collect its documents."""
+    """
+    Explore the official site of one fund and collect its documents.
+
+    ``wanted_document_types`` raises the priority of the documents that
+    would answer a particular open field, and adds them to what counts as
+    a sufficient result. ``stop_when_sufficient`` ends the walk once the
+    required groups are covered, which is what keeps the first pass of a
+    two-pass run cheap on the funds that publish properly.
+    """
 
     fund_id = stable_fund_id(fund)
 
@@ -601,7 +631,17 @@ async def discover_official_sources(
                 entries=entries,
                 enqueue=enqueue,
                 max_documents=max_documents,
+                wanted_document_types=wanted_document_types,
             )
+
+        if stop_when_sufficient and _covers_what_is_needed(
+            documents=documents,
+            wanted_document_types=wanted_document_types,
+        ):
+            # The site has already answered every required group. Walking
+            # the rest of it would only find further copies of what is
+            # in hand, which Step 8 showed is where conflicts come from.
+            break
 
     budget_exhausted = bool(frontier)
 
@@ -662,7 +702,31 @@ async def discover_official_sources(
         entries=tuple(entries),
         metrics=metrics,
         warnings=tuple(warnings),
+        wanted_document_types=wanted_document_types,
     )
+
+
+def _covers_what_is_needed(
+    *,
+    documents: dict[str, DiscoveredLink],
+    wanted_document_types: frozenset[DocumentType],
+) -> bool:
+    """
+    Return whether the documents in hand answer what the pass came for.
+
+    Every required group has to be present, and at least one of the
+    document types the caller asked for by name. A pass sent out for
+    annual reports is not finished because it found a key information
+    document, but it is finished once it holds one of the several kinds
+    of report that would answer the same field.
+    """
+
+    found = {document.document_type for document in documents.values()}
+
+    if any(not (found & accepted) for _, accepted in REQUIRED_DOCUMENT_GROUPS):
+        return False
+
+    return not wanted_document_types or bool(found & wanted_document_types)
 
 
 def _consider_link(
@@ -678,6 +742,7 @@ def _consider_link(
     entries: list[DiscoveryEntry],
     enqueue: Enqueue,
     max_documents: int,
+    wanted_document_types: frozenset[DocumentType] = frozenset(),
 ) -> None:
     """Decide what one link found on an official page is worth."""
 
@@ -688,7 +753,10 @@ def _consider_link(
         fund_name=fund.name,
     )
 
-    score = score_link(signals)
+    score = score_link(
+        signals,
+        wanted_document_types=wanted_document_types,
+    )
 
     named_type = _named_document_type(
         link_url=link_url,
