@@ -12,10 +12,6 @@ from fundscraper.config import (
     ConfigurationError,
     HttpSettings,
 )
-from fundscraper.crawl_planning import (
-    DEEP_BUDGET,
-    FAST_BUDGET,
-)
 from fundscraper.crawl_service import (
     CrawlError,
     CrawlSummary,
@@ -262,7 +258,7 @@ def generate_schema(
             help="Path for the generated JSON Schema file.",
             dir_okay=False,
         ),
-    ] = Path("docs/funds-output.schema.json"),
+    ] = Path("schemas/extended-output.schema.json"),
 ) -> None:
     """Generate JSON Schema for the enriched output data."""
 
@@ -2597,7 +2593,7 @@ def two_pass_command(
                         conflicts_path,
                         "conflicts",
                     ),
-                    deep_budget=(FAST_BUDGET if skip_deep_pass else DEEP_BUDGET),
+                    skip_deep_pass=skip_deep_pass,
                     concurrency=concurrency,
                     force=force,
                     avant_fallback=avant_fallback,

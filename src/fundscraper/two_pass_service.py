@@ -142,6 +142,8 @@ async def run_two_pass(
     porovnejfondy_fallback: bool = False,
     anydoc_fallback: bool = False,
     run_id: str = "step7",
+    # Compute and report the deep-pass selection without crawling it.
+    skip_deep_pass: bool = False,
 ) -> TwoPassSummary:
     """
     Run the fast pass over the selection, then the deep pass where needed.
@@ -150,6 +152,10 @@ async def run_two_pass(
     funds`` is what this run crawls. The database and the output file are
     synchronized against the canonical list first, so running a sample
     never shrinks the dataset to the sample.
+
+    ``skip_deep_pass`` still selects the funds that would be crawled again
+    and reports them, but crawls none of them. It is what makes a dry run
+    of the selection cheap.
     """
 
     started_at = datetime.now(UTC)
@@ -214,7 +220,7 @@ async def run_two_pass(
 
     deep_funds = [funds_by_id[plan.fund_id] for plan in plans if plan.fund_id in funds_by_id]
 
-    if deep_funds:
+    if deep_funds and not skip_deep_pass:
         summary.deep_results = await _run_pass(
             database_path=database_path,
             output_path=output_path,

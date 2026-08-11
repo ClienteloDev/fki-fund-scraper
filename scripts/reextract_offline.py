@@ -11,7 +11,7 @@ The processing database is only read, so the original run stays intact.
 Usage:
 
     uv run python scripts/reextract_offline.py \\
-        --input data/input/funds.audit-rerun.json \\
+        --input data/input/funds.json \\
         --database cache/regen.sqlite3 \\
         --output data/output/funds.reextracted.json
 """
@@ -98,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path("data/input/funds.audit-rerun.json"),
+        default=Path("data/input/funds.json"),
         help="Fund list the previous run was started with.",
     )
     parser.add_argument(
