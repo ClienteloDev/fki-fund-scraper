@@ -218,6 +218,7 @@ def test_accepts_a_news_item_of_the_official_fund_website() -> None:
                 source_domain="rezidentoalfa.cz",
                 source_type=NewsSourceType.OFFICIAL_FUND,
                 relation_confidence=Confidence.MEDIUM,
+                published_at=date(2026, 3, 1),
             )
         ],
         fund_name=FUND_NAME,
@@ -225,6 +226,27 @@ def test_accepts_a_news_item_of_the_official_fund_website() -> None:
     )
 
     assert not findings
+
+
+def test_reports_a_news_item_that_states_no_publication_date() -> None:
+    findings = validate_news_items(
+        items=[
+            FundNewsItem(
+                title="Nový projekt v Brně",
+                url="https://www.rezidentoalfa.cz/aktuality/novy-projekt",  # type: ignore[arg-type]
+                source_domain="rezidentoalfa.cz",
+                source_type=NewsSourceType.OFFICIAL_FUND,
+                relation_confidence=Confidence.MEDIUM,
+            )
+        ],
+        fund_name=FUND_NAME,
+        fund_web=FUND_WEB,
+    )
+
+    assert ValidationCode.NEWS_WITHOUT_DATE.value in _codes(findings)
+
+    # The item stays: a dateless announcement is still an announcement.
+    assert not rejects(findings)
 
 
 def test_refuses_an_inferred_minimum_investment_without_a_legal_basis() -> None:

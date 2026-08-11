@@ -315,6 +315,13 @@ class HttpFetcher:
             asyncio.Semaphore,
         ] = {}
 
+        # How often the filesystem cache answered instead of the network.
+        # A two-pass run visits many funds twice, and the difference
+        # between the passes is only readable next to this number.
+        self.cache_hits = 0
+
+        self.cache_misses = 0
+
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(settings.timeout_seconds),
             limits=httpx.Limits(
@@ -365,7 +372,11 @@ class HttpFetcher:
                 cached_result = self.cache.load(normalized_url)
 
                 if cached_result is not None:
+                    self.cache_hits += 1
+
                     return cached_result
+
+            self.cache_misses += 1
 
             try:
                 async for attempt in AsyncRetrying(

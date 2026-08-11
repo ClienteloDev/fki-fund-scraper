@@ -12,6 +12,10 @@ from fundscraper.config import (
     ConfigurationError,
     HttpSettings,
 )
+from fundscraper.crawl_planning import (
+    DEEP_BUDGET,
+    FAST_BUDGET,
+)
 from fundscraper.crawl_service import (
     CrawlError,
     CrawlSummary,
@@ -84,6 +88,7 @@ from fundscraper.http_client import (
     HttpFetcher,
 )
 from fundscraper.input_loader import InputFileError, load_funds
+from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_domain, canonical_url
 from fundscraper.official_discovery import (
     OfficialDiscoveryResult,
@@ -106,6 +111,11 @@ from fundscraper.pipeline_service import (
     run_fund_pipeline,
     synchronize_output_file,
     write_batch_report,
+)
+from fundscraper.two_pass_service import (
+    TwoPassSummary,
+    run_two_pass,
+    write_two_pass_report,
 )
 
 app = typer.Typer(
@@ -2405,3 +2415,284 @@ def apply_grounded_decisions_command(
     typer.echo(f"Funds updated: {summary.funds_updated}")
 
     typer.echo(f"Output file: {summary.output_path}")
+
+
+@app.command("two-pass")
+def two_pass_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Canonical fund list. Every fund in it is registered.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Enriched output JSON file.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.full.json"),
+    report_path: Annotated[
+        Path,
+        typer.Option(
+            "--report",
+            help="JSON report of the two-pass run.",
+            dir_okay=False,
+        ),
+    ] = Path("reports/step7-two-pass.json"),
+    audit_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--audit",
+            help="Step 4 audit report used to select deep-pass funds.",
+            dir_okay=False,
+        ),
+    ] = None,
+    conflicts_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--conflicts",
+            help="Step 8 conflict report used to select deep-pass funds.",
+            dir_okay=False,
+        ),
+    ] = None,
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="HTTP cache directory, shared by both passes.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    parsed_directory: Annotated[
+        Path,
+        typer.Option(
+            "--parsed-directory",
+            help="Parsed document directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/parsed"),
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            min=0,
+            help="Crawl only the first N funds. 0 means every fund.",
+        ),
+    ] = 0,
+    offset: Annotated[
+        int,
+        typer.Option(
+            "--offset",
+            min=0,
+            help="Number of input funds to skip before crawling.",
+        ),
+    ] = 0,
+    fund_id: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--fund-id",
+            help="Crawl only these funds. May be repeated.",
+        ),
+    ] = None,
+    concurrency: Annotated[
+        int,
+        typer.Option(
+            "--concurrency",
+            min=1,
+            max=20,
+            help="Maximum funds processed concurrently.",
+        ),
+    ] = 6,
+    skip_deep_pass: Annotated[
+        bool,
+        typer.Option(
+            "--skip-deep-pass",
+            help="Run only the fast pass and report what the deep pass would do.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore the HTTP cache and refetch everything.",
+        ),
+    ] = False,
+    avant_fallback: Annotated[
+        bool,
+        typer.Option("--avant-fallback"),
+    ] = False,
+    amista_fallback: Annotated[
+        bool,
+        typer.Option("--amista-fallback"),
+    ] = False,
+    porovnejfondy_fallback: Annotated[
+        bool,
+        typer.Option("--porovnejfondy-fallback"),
+    ] = False,
+    anydoc_fallback: Annotated[
+        bool,
+        typer.Option("--anydoc-fallback"),
+    ] = False,
+) -> None:
+    """
+    Crawl every fund cheaply, then crawl the problem funds deeply.
+
+    The canonical fund list is always registered in full, so limiting a
+    run to a sample never shrinks the database or the output file to it.
+    """
+
+    try:
+        canonical_funds = load_funds(input_path.resolve())
+
+        selected_funds = _two_pass_selection(
+            funds=canonical_funds,
+            fund_ids=list(fund_id or []),
+            offset=offset,
+            limit=limit,
+        )
+
+        if not selected_funds:
+            typer.echo(
+                "No fund matched the selection.",
+                err=True,
+            )
+
+            raise typer.Exit(code=1)
+
+        settings = HttpSettings.from_environment()
+
+        async def run() -> tuple[TwoPassSummary, int, int]:
+            async with HttpFetcher(
+                settings,
+                cache_directory.resolve(),
+            ) as fetcher:
+                summary = await run_two_pass(
+                    database_path=database_path.resolve(),
+                    output_path=output_path.resolve(),
+                    parsed_directory=parsed_directory.resolve(),
+                    canonical_funds=canonical_funds,
+                    selected_funds=selected_funds,
+                    fetcher=fetcher,
+                    audit_findings=_report_section(
+                        audit_path,
+                        "findings",
+                    ),
+                    conflict_records=_report_section(
+                        conflicts_path,
+                        "conflicts",
+                    ),
+                    deep_budget=(FAST_BUDGET if skip_deep_pass else DEEP_BUDGET),
+                    concurrency=concurrency,
+                    force=force,
+                    avant_fallback=avant_fallback,
+                    amista_fallback=amista_fallback,
+                    porovnejfondy_fallback=porovnejfondy_fallback,
+                    anydoc_fallback=anydoc_fallback,
+                )
+
+                return (
+                    summary,
+                    fetcher.cache_hits,
+                    fetcher.cache_misses,
+                )
+
+        summary, cache_hits, cache_misses = asyncio.run(run())
+
+        write_two_pass_report(
+            summary=summary,
+            report_path=report_path.resolve(),
+            cache_hits=cache_hits,
+            cache_misses=cache_misses,
+        )
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        OutputFileError,
+    ) as exc:
+        typer.echo(
+            f"Two-pass run failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    fast = summary.fast_metrics
+
+    deep = summary.deep_metrics
+
+    typer.echo("")
+    typer.echo(f"Canonical funds registered: {summary.canonical_funds}")
+    typer.echo(
+        f"Fast pass:  {fast.funds} funds, {fast.pages_visited} pages, "
+        f"{fast.documents_downloaded} documents"
+    )
+    typer.echo(f"Deep pass selected: {len(summary.plans)} funds")
+    typer.echo(
+        f"Deep pass:  {deep.funds} funds, {deep.pages_visited} pages, "
+        f"{deep.documents_downloaded} documents"
+    )
+    typer.echo(
+        f"Superseded copies skipped: {fast.superseded_documents + deep.superseded_documents}"
+    )
+    typer.echo(f"HTTP cache: {cache_hits} hits, {cache_misses} misses")
+    typer.echo(f"Recovered fields: {len(summary.recovered_fields)}")
+    typer.echo(f"Output file: {summary.output_path}")
+    typer.echo(f"Report file: {report_path}")
+
+
+def _two_pass_selection(
+    *,
+    funds: list[FundInput],
+    fund_ids: list[str],
+    offset: int,
+    limit: int,
+) -> list[FundInput]:
+    """Return the funds this run crawls, out of the canonical list."""
+
+    if fund_ids:
+        wanted = set(fund_ids)
+
+        return [fund for fund in funds if stable_fund_id(fund) in wanted]
+
+    chosen = funds[offset:]
+
+    return chosen[:limit] if limit > 0 else chosen
+
+
+def _report_section(
+    path: Path | None,
+    key: str,
+) -> list[dict[str, object]]:
+    """Read one array out of a report, or nothing when it is absent."""
+
+    if path is None or not path.exists():
+        return []
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    section = payload.get(key) if isinstance(payload, dict) else None
+
+    if not isinstance(section, list):
+        return []
+
+    return [item for item in section if isinstance(item, dict)]

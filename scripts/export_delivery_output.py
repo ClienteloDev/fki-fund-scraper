@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-
 FIELD_NAMES = (
     "investment_horizon",
     "minimum_investment",
@@ -28,7 +27,10 @@ ALLOWED_INTERNAL_STATUSES = {
 DEFAULT_REASON_DETAILS = {
     "pending": "The field was not processed successfully before the export was created.",
     "not_found": "No sufficiently reliable public value was found in the processed sources.",
-    "ambiguous": "Multiple possible values or scopes were found and the correct value could not be determined reliably.",
+    "ambiguous": (
+        "Multiple possible values or scopes were found and the correct "
+        "value could not be determined reliably."
+    ),
     "conflicting": "Conflicting values were found in the available sources.",
     "error": "The field could not be produced because processing ended with an error.",
 }
@@ -134,10 +136,7 @@ def extract_missing_reason(
         code = reason.get("code")
         detail = reason.get("detail")
 
-        if isinstance(code, str) and code.strip():
-            reason_code = code.strip()
-        else:
-            reason_code = internal_status
+        reason_code = code.strip() if isinstance(code, str) and code.strip() else internal_status
 
         if isinstance(detail, str) and detail.strip():
             reason_detail = detail.strip()

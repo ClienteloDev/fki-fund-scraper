@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from fundscraper.conflict_resolution import ConflictLedger
 from fundscraper.database import (
     AttemptStatus,
     DatabaseError,
@@ -72,16 +73,32 @@ class ExtractionSummary:
     ] = ()
     extended_rows: int = 0
 
+    # How many groups of candidates disagreed about the same thing while
+    # this fund was extracted. Zero for a caller that passes no ledger.
+    conflicts_inspected: int = 0
+
 
 def extract_fund_data(
     *,
     database_path: Path,
     output_path: Path,
     fund: FundInput,
+    ledger: ConflictLedger | None = None,
 ) -> ExtractionSummary:
-    """Extract supported fields and update one fund in output JSON."""
+    """
+    Extract supported fields and update one fund in output JSON.
+
+    ``ledger`` collects every disagreement the extraction had to decide.
+    It is optional because the delivered output does not depend on it:
+    the winner and its losing alternatives reach the file either way, and
+    the ledger is what the conflict report is written from.
+    """
 
     fund_id = stable_fund_id(fund)
+
+    fund_ledger = ledger.for_fund(fund.name) if ledger is not None else None
+
+    conflicts_before = len(ledger.records) if ledger is not None else 0
 
     record_attempt(
         database_path,
@@ -119,12 +136,15 @@ def extract_fund_data(
         extracted = extract_fund_fields(
             fund_name=fund.name,
             documents=documents,
+            fund_web=fund.web,
+            ledger=fund_ledger,
         )
 
         extended = extract_extended_fields(
             fund_name=fund.name,
             fund_web=fund.web,
             documents=documents,
+            ledger=fund_ledger,
         )
 
         field_statuses = (
@@ -242,6 +262,7 @@ def extract_fund_data(
         output_path=output_path,
         extended_statuses=extended_field_statuses(extended),
         extended_rows=persistence.total,
+        conflicts_inspected=((len(ledger.records) - conflicts_before) if ledger else 0),
     )
 
 

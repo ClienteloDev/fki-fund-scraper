@@ -47,6 +47,8 @@ def _run(
     tmp_path: Path,
     database_path: Path | None = None,
     max_pages: int = 15,
+    wanted_document_types: frozenset[DocumentType] = frozenset(),
+    stop_when_sufficient: bool = False,
 ) -> OfficialDiscoveryResult:
     def handler(request: httpx.Request) -> httpx.Response:
         key = f"{request.url.host}{request.url.path}"
@@ -85,6 +87,8 @@ def _run(
                 fund=fund,
                 fetcher=fetcher,
                 max_pages=max_pages,
+                wanted_document_types=wanted_document_types,
+                stop_when_sufficient=stop_when_sufficient,
             )
 
     return asyncio.run(run())
@@ -763,3 +767,86 @@ def test_a_subfund_document_is_not_read_as_another_fund() -> None:
         link_url="https://www.spravce.cz/dokumenty/statut.pdf",
         anchor_text="Statut Rezidento Alfa SICAV, a.s.",
     )
+
+
+def test_stops_once_the_required_document_groups_are_covered(
+    tmp_path: Path,
+) -> None:
+    """
+    The fast pass of a two-pass run leaves a site it has answers from.
+
+    Walking the rest of it would only find further copies of what is
+    already in hand, which Step 8 showed is where conflicts come from.
+    """
+
+    complete = _run(
+        fund=STANDALONE_FUND,
+        pages=STANDALONE_PAGES,
+        tmp_path=tmp_path / "complete",
+    )
+
+    early = _run(
+        fund=STANDALONE_FUND,
+        pages=STANDALONE_PAGES,
+        tmp_path=tmp_path / "early",
+        stop_when_sufficient=True,
+    )
+
+    assert early.is_sufficient
+
+    assert early.metrics.pages_fetched <= complete.metrics.pages_fetched
+
+
+def test_the_wanted_document_types_are_not_yet_satisfied_by_the_others(
+    tmp_path: Path,
+) -> None:
+    """
+    A pass sent out for one document type is not finished without it.
+
+    The site publishes no financial statements, so a deep pass looking
+    for them reports the type as missing however complete the rest is.
+    """
+
+    result = _run(
+        fund=STANDALONE_FUND,
+        pages=STANDALONE_PAGES,
+        tmp_path=tmp_path,
+        wanted_document_types=frozenset({DocumentType.FINANCIAL_STATEMENTS}),
+        stop_when_sufficient=True,
+    )
+
+    assert any(
+        item.startswith("wanted:") and DocumentType.FINANCIAL_STATEMENTS.value in item
+        for item in result.missing_document_groups
+    )
+
+    assert not result.is_sufficient
+
+
+def test_any_one_of_the_wanted_document_types_answers_the_pass(
+    tmp_path: Path,
+) -> None:
+    """
+    A field is answered by any of its documents, not by all of them.
+
+    A deep pass looking for the assets of a fund asks for the annual
+    report, the financial statements, the half-year report and the
+    factsheet at once. Finding the annual report answers the question.
+    """
+
+    result = _run(
+        fund=STANDALONE_FUND,
+        pages=STANDALONE_PAGES,
+        tmp_path=tmp_path,
+        wanted_document_types=frozenset(
+            {
+                DocumentType.ANNUAL_REPORT,
+                DocumentType.FINANCIAL_STATEMENTS,
+                DocumentType.HALF_YEAR_REPORT,
+            }
+        ),
+    )
+
+    assert result.is_sufficient
+
+    assert result.missing_document_groups == ()

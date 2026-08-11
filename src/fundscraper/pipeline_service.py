@@ -9,6 +9,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 
+from fundscraper.crawl_planning import (
+    CrawlBudget,
+    CrawlPass,
+    select_authoritative_documents,
+)
 from fundscraper.crawl_service import (
     CrawlSummary,
     crawl_fund_site,
@@ -47,6 +52,7 @@ from fundscraper.official_discovery import (
     discover_official_sources,
 )
 from fundscraper.output_models import (
+    DocumentType,
     ProcessingMetadata,
     ProcessingStatus,
 )
@@ -116,6 +122,11 @@ class FundPipelineResult:
         tuple[str, int],
         ...,
     ] = ()
+
+    # Which of the two passes produced this result, and what the
+    # authoritative-copy selection left out of the download list.
+    crawl_pass: str = CrawlPass.FAST.value
+    superseded_documents: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,8 +309,23 @@ async def run_fund_pipeline(
     output_lock: asyncio.Lock | None = None,
     discovery_run_id: str = "",
     anydoc_fallback: bool = False,
+    # Step 7. A budget replaces the four separate limits when one is
+    # given, and the wanted types tell the official stage what this pass
+    # was sent out to find.
+    budget: CrawlBudget | None = None,
+    wanted_document_types: frozenset[DocumentType] = frozenset(),
+    crawl_pass: CrawlPass = CrawlPass.FAST,
 ) -> FundPipelineResult:
     """Run adapter discovery, crawl, parsing and extraction for one fund."""
+
+    if budget is not None:
+        max_pages = budget.max_pages
+
+        max_depth = budget.max_depth
+
+        max_documents = budget.max_documents
+
+        document_concurrency = budget.document_concurrency
 
     started = perf_counter()
 
@@ -350,6 +376,10 @@ async def run_fund_pipeline(
             fetcher=fetcher,
             force=force,
             run_id=discovery_run_id,
+            max_pages=(budget.official_max_pages if budget else 18),
+            max_documents=(budget.official_max_documents if budget else 60),
+            wanted_document_types=wanted_document_types,
+            stop_when_sufficient=(budget.stop_when_sufficient if budget else False),
         )
 
         official_discovery = official_result
@@ -387,6 +417,14 @@ async def run_fund_pipeline(
         # This call must remain outside the adapter condition.
         # Funds without a domain adapter still need to run
         # through the normal crawler.
+        # Step 8 found that most disagreements between sources are one
+        # document published twice, or a revision sitting next to its
+        # predecessor. Downloading every copy buys a conflict, so one
+        # copy per document and revision is handed to the crawler.
+        selection = select_authoritative_documents(
+            official_result.documents + adapter_result.documents
+        )
+
         crawl_result = await crawl_fund_site(
             database_path=database_path,
             fund=fund,
@@ -396,7 +434,7 @@ async def run_fund_pipeline(
             max_documents=max_documents,
             document_concurrency=document_concurrency,
             navigation_seed_urls=(official_result.navigation_urls + adapter_result.navigation_urls),
-            document_seed_links=(official_result.documents + adapter_result.documents),
+            document_seed_links=selection.kept,
             force=force,
         )
 
@@ -496,6 +534,8 @@ async def run_fund_pipeline(
             official_missing_document_groups=(official_result.missing_document_groups),
             fallback_used=fallback_used,
             discovery_method_counts=tuple(sorted(official_result.metrics.method_counts.items())),
+            crawl_pass=crawl_pass.value,
+            superseded_documents=len(selection.superseded),
             failures=tuple(failures),
             duration_seconds=round(
                 perf_counter() - started,

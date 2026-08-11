@@ -174,6 +174,8 @@ def create_extraction_document(
 
 
 def test_marks_conflicting_target_returns() -> None:
+    """Two sources of the same standing that disagree stay conflicting."""
+
     first_document = create_extraction_document(
         source_id=1,
         url="https://example.com/memorandum.pdf",
@@ -183,10 +185,9 @@ def test_marks_conflicting_target_returns() -> None:
 
     second_document = create_extraction_document(
         source_id=2,
-        url="https://example.com/factsheet.pdf",
-        title="Example Fund factsheet",
+        url="https://example.com/memorandum-2.pdf",
+        title="Example Fund memorandum",
         text=("Example Fund SICAV a.s.\nCilovy vynos fondu je 12 % p.a."),
-        document_type="factsheet",
     )
 
     result = extract_fund_fields(
@@ -204,6 +205,58 @@ def test_marks_conflicting_target_returns() -> None:
     assert result.target_return.reason.code is ReasonCode.CONFLICTING_VALUES
 
     assert len(result.target_return.attempted_sources) == 2
+
+
+def test_prefers_the_stronger_document_type_and_keeps_the_other() -> None:
+    """
+    A memorandum states the target of a fund; a factsheet reports it.
+
+    Step 8 decides between them instead of losing both, and the value it
+    did not take stays in the delivered field as an attempted source.
+    """
+
+    memorandum = create_extraction_document(
+        source_id=1,
+        url="https://example.com/memorandum.pdf",
+        title="Example Fund memorandum",
+        text=("Example Fund SICAV a.s.\nCilovy vynos fondu je 8 % p.a."),
+    )
+
+    factsheet = create_extraction_document(
+        source_id=2,
+        url="https://example.com/factsheet.pdf",
+        title="Example Fund factsheet",
+        text=("Example Fund SICAV a.s.\nCilovy vynos fondu je 12 % p.a."),
+        document_type="factsheet",
+    )
+
+    result = extract_fund_fields(
+        fund_name="Example Fund SICAV a.s.",
+        documents=[
+            memorandum,
+            factsheet,
+        ],
+    )
+
+    assert result.target_return.status is FieldStatus.FOUND
+
+    assert result.target_return.value is not None
+
+    assert result.target_return.value.value_percent_pa == 8.0
+
+    losing = [
+        attempt
+        for attempt in result.target_return.attempted_sources
+        if attempt.outcome is ReasonCode.CONFLICTING_VALUES
+    ]
+
+    assert len(losing) == 1
+
+    assert str(losing[0].url) == "https://example.com/factsheet.pdf"
+
+    assert losing[0].detail is not None
+
+    assert "document_type" in losing[0].detail
 
 
 def test_rejects_manager_level_value() -> None:

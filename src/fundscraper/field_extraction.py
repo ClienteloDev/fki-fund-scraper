@@ -12,8 +12,21 @@ from urllib.parse import urlsplit
 from pydantic import HttpUrl
 
 from fundscraper.anydoc_parser import is_anydoc_parser
+from fundscraper.conflict_resolution import (
+    UNKNOWN_DATE,
+    CandidateFacts,
+    ConflictLedger,
+    ConflictOutcome,
+    ConflictRecord,
+    Resolution,
+    classify_authority,
+    money_key,
+    number_key,
+    resolve_group,
+)
 from fundscraper.database import ParsedDocumentRecord
 from fundscraper.document_parser import ParsedDocument
+from fundscraper.extended_validation import fallback_extraction_metadata
 from fundscraper.field_definitions import (
     HOLDING_PERIOD_FROM_PATTERN,
     HOLDING_PERIOD_RANGE_PATTERN,
@@ -784,6 +797,8 @@ def extract_fund_fields(
     *,
     fund_name: str,
     documents: list[ExtractionDocument],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> ExtractedFundFields:
     """Extract all supported fund fields from parsed documents."""
 
@@ -791,22 +806,32 @@ def extract_fund_fields(
         investment_horizon=extract_investment_horizon(
             fund_name=fund_name,
             documents=documents,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
         minimum_investment=extract_minimum_investment(
             fund_name=fund_name,
             documents=documents,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
         target_return=extract_target_return(
             fund_name=fund_name,
             documents=documents,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
         fees=extract_fees(
             fund_name=fund_name,
             documents=documents,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
         assets_under_management=extract_aum(
             fund_name=fund_name,
             documents=documents,
+            fund_web=fund_web,
+            ledger=ledger,
         ),
     )
 
@@ -815,6 +840,8 @@ def extract_investment_horizon(
     *,
     fund_name: str,
     documents: list[ExtractionDocument],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[InvestmentHorizonValue]:
     candidates: list[Candidate[InvestmentHorizonValue]] = []
 
@@ -860,10 +887,11 @@ def extract_investment_horizon(
             "No quantified recommended investment horizon was found in the parsed public sources."
         ),
         detect_conflicts=True,
-        value_key=lambda value: round(
-            value.recommended_years,
-            6,
-        ),
+        value_key=lambda value: number_key(value.recommended_years),
+        field="investment_horizon",
+        fund_web=fund_web,
+        priorities=HORIZON_DOCUMENT_PRIORITY,
+        ledger=ledger,
     )
 
 
@@ -871,6 +899,8 @@ def extract_minimum_investment(
     *,
     fund_name: str,
     documents: list[ExtractionDocument],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[MinimumInvestmentValue]:
     candidates: list[Candidate[MinimumInvestmentValue]] = []
 
@@ -938,14 +968,21 @@ def extract_minimum_investment(
         documents=documents,
         missing_detail=("No quantified minimum investment was found in the parsed public sources."),
         detect_conflicts=True,
-        value_key=lambda value: (
-            round(
-                value.amount,
-                2,
-            ),
-            value.currency,
-            value.kind.value,
+        value_key=lambda value: money_key(
+            amount=value.amount,
+            currency=value.currency,
         ),
+        # A subscription minimum of one share class is not a different
+        # answer from the minimum of another, so only candidates about
+        # the same class and kind contest one another.
+        conflict_key=lambda value: (
+            value.kind.value,
+            value.share_class or "",
+        ),
+        field="minimum_investment",
+        fund_web=fund_web,
+        priorities=MINIMUM_DOCUMENT_PRIORITY,
+        ledger=ledger,
     )
 
 
@@ -953,6 +990,8 @@ def extract_target_return(
     *,
     fund_name: str,
     documents: list[ExtractionDocument],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[TargetReturnValue]:
     candidates: list[Candidate[TargetReturnValue]] = []
 
@@ -987,11 +1026,23 @@ def extract_target_return(
         ),
         detect_conflicts=True,
         value_key=lambda value: (
-            value.value_percent_pa,
-            value.minimum_percent_pa,
-            value.maximum_percent_pa,
-            value.return_type.value,
+            number_key(value.value_percent_pa),
+            number_key(value.minimum_percent_pa),
+            number_key(value.maximum_percent_pa),
         ),
+        # An expected return, a hurdle and a guaranteed minimum are
+        # different concepts of the same fund and may all be true, so
+        # only two statements of the same concept for the same class
+        # contradict each other.
+        conflict_key=lambda value: (
+            value.return_type.value,
+            value.share_class or "",
+            value.subfund or "",
+        ),
+        field="target_return",
+        fund_web=fund_web,
+        priorities=TARGET_DOCUMENT_PRIORITY,
+        ledger=ledger,
     )
 
 
@@ -1134,6 +1185,8 @@ def extract_fees(
     *,
     fund_name: str,
     documents: list[ExtractionDocument],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[FeeCollection]:
     candidates: list[Candidate[FeeCollection]] = []
 
@@ -1247,6 +1300,17 @@ def extract_fees(
             "No quantified entry, management, performance, exit "
             "or ongoing fee was found in the parsed public sources."
         ),
+        detect_conflicts=True,
+        # Two fee schedules disagree when they state a different rate for
+        # a fee an investor pays. One document listing more fee types
+        # than another says more, not something else, so the comparison
+        # is made over the rate of each type and its tiers.
+        value_key=fee_collection_key,
+        display=describe_fee_collection,
+        field="fees",
+        fund_web=fund_web,
+        priorities=FEE_DOCUMENT_PRIORITY,
+        ledger=ledger,
     )
 
 
@@ -1390,6 +1454,8 @@ def extract_aum(
     *,
     fund_name: str,
     documents: list[ExtractionDocument],
+    fund_web: str | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[AssetsUnderManagementValue]:
     candidates: list[Candidate[AssetsUnderManagementValue]] = []
 
@@ -1481,6 +1547,23 @@ def extract_aum(
             "No dated and quantified fund-level assets-under-management "
             "or net-assets value was found."
         ),
+        detect_conflicts=True,
+        value_key=lambda value: money_key(
+            amount=value.amount,
+            currency=value.currency,
+        ),
+        # The assets of one date and the assets of another are both true.
+        # Only two figures of the same metric on the same day in the same
+        # currency can contradict each other.
+        conflict_key=lambda value: (
+            value.metric_type.value,
+            value.as_of.isoformat(),
+            value.currency,
+        ),
+        field="assets_under_management",
+        fund_web=fund_web,
+        priorities=AUM_DOCUMENT_PRIORITY,
+        ledger=ledger,
     )
 
 
@@ -2161,6 +2244,268 @@ def resolve_document_type(
         return DocumentType.OTHER
 
 
+@dataclass(frozen=True, slots=True)
+class FieldConflictDecision[ValueT]:
+    """What the resolver decided about one field of one fund."""
+
+    record: ConflictRecord
+    selected: tuple[Candidate[ValueT], SourceScope] | None
+    alternatives_with_scope: tuple[
+        tuple[
+            Candidate[ValueT],
+            SourceScope,
+        ],
+        ...,
+    ]
+
+    @property
+    def alternatives(self) -> list[Candidate[ValueT]]:
+        return [candidate for candidate, _ in self.alternatives_with_scope]
+
+
+def candidate_facts(
+    *,
+    document: ExtractionDocument,
+    quote: str,
+    page_number: int | None,
+    score: int,
+    scope: SourceScope,
+    fund_name: str,
+    fund_web: str | None,
+    priorities: dict[DocumentType, int] | None,
+    ledger: ConflictLedger | None,
+    display_value: str,
+    raw_value: str,
+) -> CandidateFacts:
+    """Describe one candidate in the terms the comparison understands."""
+
+    record = document.record
+
+    dates = (
+        ledger.dates.read(
+            source_id=record.source_id,
+            url=record.url,
+            text=document.document.full_text,
+        )
+        if ledger is not None
+        else UNKNOWN_DATE
+    )
+
+    return CandidateFacts(
+        display_value=display_value,
+        raw_value=raw_value,
+        source_id=record.source_id,
+        source_url=record.url,
+        source_title=record.title,
+        document_type=record.document_type,
+        quote=quote,
+        page=page_number,
+        scope=scope.value,
+        scope_rank=_scope_rank(scope),
+        # The entity of this candidate was already confirmed by the scope
+        # rules, so the authority ladder ranks a source that was accepted
+        # rather than deciding whether to accept it.
+        authority=classify_authority(
+            source_url=record.url,
+            source_title=record.title,
+            fund_name=fund_name,
+            fund_web=fund_web,
+            names_the_fund=scope in ACCEPTED_SCOPES,
+        ),
+        document_priority=(
+            document_priority(
+                document,
+                priorities,
+            )
+            if priorities is not None
+            else 0
+        ),
+        date=dates,
+        parser_name=record.parser_name,
+        score=score,
+    )
+
+
+def resolve_field_candidates[ValueT](
+    *,
+    fund_name: str,
+    fund_web: str | None,
+    field: str,
+    ranked_candidates: Sequence[
+        tuple[
+            Candidate[ValueT],
+            SourceScope,
+        ]
+    ],
+    value_key: Callable[[ValueT], Hashable],
+    conflict_key: Callable[[ValueT], Hashable] | None,
+    display: Callable[[ValueT], str] | None = None,
+    priorities: dict[DocumentType, int] | None = None,
+    ledger: ConflictLedger | None = None,
+) -> FieldConflictDecision[ValueT] | None:
+    """
+    Compare the candidates that claim the same thing as the leading one.
+
+    Only the group of the leading candidate is contested. A document
+    reporting a different date, class or metric makes a different claim,
+    and the field reports one of them, not an argument between them.
+    """
+
+    leader = ranked_candidates[0]
+
+    group_key = conflict_key(leader[0].value) if conflict_key is not None else None
+
+    group = [
+        item
+        for item in ranked_candidates
+        if conflict_key is None or conflict_key(item[0].value) == group_key
+    ]
+
+    if len(group) < 2:
+        return None
+
+    def facts_of(
+        item: tuple[Candidate[ValueT], SourceScope],
+    ) -> CandidateFacts:
+        return candidate_facts(
+            document=item[0].document,
+            quote=item[0].quote,
+            page_number=item[0].page_number,
+            score=item[0].score,
+            scope=item[1],
+            fund_name=fund_name,
+            fund_web=fund_web,
+            priorities=priorities,
+            ledger=ledger,
+            display_value=(
+                display(item[0].value) if display is not None else str(value_key(item[0].value))
+            ),
+            raw_value=item[0].raw_value,
+        )
+
+    resolution: Resolution[tuple[Candidate[ValueT], SourceScope]] = resolve_group(
+        fund_name=fund_name,
+        field=field,
+        semantic_key=str(group_key) if group_key is not None else field,
+        items=group,
+        facts_of=facts_of,
+        value_key=lambda item: value_key(item[0].value),
+    )
+
+    # A group of one is not a disagreement and is not reported. A group
+    # whose members all say the same thing is: it is what the report
+    # counts as equivalent after normalization.
+    if ledger is not None:
+        ledger.record(resolution.record)
+
+    if resolution.outcome is ConflictOutcome.EQUIVALENT:
+        return None
+
+    return FieldConflictDecision(
+        record=resolution.record,
+        selected=resolution.selected,
+        alternatives_with_scope=tuple(
+            item for item in resolution.alternatives if item is not resolution.selected
+        ),
+    )
+
+
+def _losing_source_attempts[ValueT](
+    *,
+    candidates: Sequence[Candidate[ValueT]],
+    detail: str,
+) -> list[SourceAttempt]:
+    """Record a candidate that lost a resolved conflict as an attempt."""
+
+    attempts: list[SourceAttempt] = []
+
+    seen: set[str] = set()
+
+    for candidate in candidates:
+        record = candidate.document.record
+
+        if record.url in seen:
+            continue
+
+        seen.add(record.url)
+
+        attempts.append(
+            SourceAttempt(
+                url=HttpUrl(record.url),
+                retrieved_at=source_datetime(record),
+                outcome=ReasonCode.CONFLICTING_VALUES,
+                document_type=resolve_document_type(record.document_type),
+                detail=f"{candidate.quote[:200]} | not selected: {detail}"[:500],
+            )
+        )
+
+    return attempts
+
+
+def fee_collection_key(
+    collection: FeeCollection,
+) -> Hashable:
+    """
+    Return what two fee schedules have to agree on to be the same.
+
+    Only the charge itself is compared. The wording of the basis, the
+    order of the items and the free text of a condition differ between a
+    statute and a price list without the investor paying anything else,
+    and comparing them would report every pair of documents as a
+    disagreement.
+    """
+
+    return frozenset(
+        (
+            item.type.value,
+            number_key(item.rate_percent),
+            number_key(item.fixed_amount),
+            item.currency or "",
+            number_key(item.minimum_rate_percent),
+            number_key(item.maximum_rate_percent),
+            tuple(
+                sorted(
+                    (
+                        tier.basis.value,
+                        tier.from_months,
+                        tier.to_months,
+                        tier.share_class or "",
+                        number_key(tier.rate_percent),
+                        number_key(tier.fixed_amount),
+                    )
+                    for tier in item.tiers
+                )
+            ),
+        )
+        for item in collection.items
+    )
+
+
+def describe_fee_collection(
+    collection: FeeCollection,
+) -> str:
+    """Return a fee schedule in the shortest form a reader can compare."""
+
+    parts: list[str] = []
+
+    for item in sorted(
+        collection.items,
+        key=lambda entry: entry.type.value,
+    ):
+        if item.rate_percent is not None:
+            parts.append(f"{item.type.value} {item.rate_percent:g} %")
+        elif item.fixed_amount is not None:
+            amount = f"{item.fixed_amount:,.0f} {item.currency or ''}".strip()
+
+            parts.append(f"{item.type.value} {amount}")
+        elif item.tiers:
+            parts.append(f"{item.type.value} {len(item.tiers)} tiers")
+        else:
+            parts.append(item.type.value)
+
+    return ", ".join(parts)
+
+
 def candidate_or_missing[ValueT](
     *,
     fund_name: str,
@@ -2175,6 +2520,23 @@ def candidate_or_missing[ValueT](
         ]
         | None
     ) = None,
+    # Step 8. Candidates only contest one another when they claim the
+    # same thing. A different reporting date, share class or metric is a
+    # different claim, and two of them are not a disagreement.
+    conflict_key: (
+        Callable[
+            [ValueT],
+            Hashable,
+        ]
+        | None
+    ) = None,
+    # How the value reads in the conflict report. A collection compares
+    # as a set of normalized charges, which is precise and unreadable.
+    display: Callable[[ValueT], str] | None = None,
+    field: str = "",
+    fund_web: str | None = None,
+    priorities: dict[DocumentType, int] | None = None,
+    ledger: ConflictLedger | None = None,
 ) -> FieldResult[ValueT]:
     if not candidates:
         return missing_result(
@@ -2223,20 +2585,39 @@ def candidate_or_missing[ValueT](
 
     best_candidate, best_scope = ranked_candidates[0]
 
+    losing_candidates: tuple[Candidate[ValueT], ...] = ()
+
+    resolution_note = ""
+
     if detect_conflicts and value_key is not None:
-        conflicting_candidates = _find_conflicting_candidates(
-            best_candidate=best_candidate,
-            best_scope=best_scope,
+        decision = resolve_field_candidates(
+            fund_name=fund_name,
+            fund_web=fund_web,
+            field=field or "value",
             ranked_candidates=ranked_candidates,
             value_key=value_key,
+            conflict_key=conflict_key,
+            display=display,
+            priorities=priorities,
+            ledger=ledger,
         )
 
-        if conflicting_candidates:
-            return _conflicting_result(
-                best_candidate=best_candidate,
-                conflicting_candidates=(conflicting_candidates),
-                documents=documents,
+        if decision is not None:
+            if decision.selected is None:
+                return _conflicting_result(
+                    best_candidate=best_candidate,
+                    conflicting_candidates=list(decision.alternatives),
+                    documents=documents,
+                    detail=decision.record.reason,
+                )
+
+            best_candidate, best_scope = decision.selected
+
+            losing_candidates = tuple(
+                candidate for candidate, _ in decision.alternatives_with_scope
             )
+
+            resolution_note = decision.record.reason
 
     confidence = confidence_from_score(best_candidate.score)
 
@@ -2256,9 +2637,7 @@ def candidate_or_missing[ValueT](
     # reviewer, and one that could not even be placed on a page, so that
     # a reader cannot check it against the document, is worth less still.
     if is_anydoc_parser(source_record.parser_name):
-        review_required = True
-
-        confidence = fallback_confidence(
+        confidence, review_required = fallback_extraction_metadata(
             confidence,
             placed_on_a_page=best_candidate.page_number is not None,
         )
@@ -2285,6 +2664,13 @@ def candidate_or_missing[ValueT](
             method=ExtractionMethod.REGEX,
             confidence=confidence,
             review_required=review_required,
+        ),
+        # A candidate that lost a resolved conflict is kept next to the
+        # winner, with the value it stated and the reason it lost, so the
+        # delivered file never hides that a second source said otherwise.
+        attempted_sources=_losing_source_attempts(
+            candidates=losing_candidates,
+            detail=resolution_note,
         ),
     )
 
@@ -2991,6 +3377,7 @@ def _conflicting_result[ValueT](
     best_candidate: Candidate[ValueT],
     conflicting_candidates: list[Candidate[ValueT]],
     documents: list[ExtractionDocument],
+    detail: str = "",
 ) -> FieldResult[ValueT]:
     all_candidates = [
         best_candidate,
@@ -3002,9 +3389,12 @@ def _conflicting_result[ValueT](
         reason=MissingReason(
             code=ReasonCode.CONFLICTING_VALUES,
             detail=(
-                "Multiple similarly reliable fund-level sources "
-                "contain materially different values. The field "
-                "requires source-date, share-class or manual review."
+                detail
+                or (
+                    "Multiple similarly reliable fund-level sources "
+                    "contain materially different values. The field "
+                    "requires source-date, share-class or manual review."
+                )
             ),
         ),
         attempted_sources=_candidate_source_attempts(
@@ -3116,10 +3506,9 @@ def fallback_confidence(
 ) -> Confidence:
     """Return what a value read from a rebuilt text is worth."""
 
-    if not placed_on_a_page:
-        return Confidence.LOW
+    reduced, _ = fallback_extraction_metadata(
+        confidence,
+        placed_on_a_page=placed_on_a_page,
+    )
 
-    if confidence is Confidence.HIGH:
-        return Confidence.MEDIUM
-
-    return confidence
+    return reduced
