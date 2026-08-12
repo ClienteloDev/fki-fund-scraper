@@ -17,6 +17,7 @@ from fundscraper.crawl_planning import (
     FIELD_DOCUMENT_TYPES,
     TRIGGER_FIELDS,
     DeepPassTrigger,
+    DiscoveryOutcome,
     conflict_is_between_sources,
     select_authoritative_documents,
     select_deep_pass_funds,
@@ -361,3 +362,170 @@ def test_two_undated_documents_of_one_type_are_kept_apart_by_their_names() -> No
     )
 
     assert len(selection.kept) == 2
+
+
+# ---------------------------------------------------------------------------
+# Evidence gating: a second crawl has to have somewhere to look
+# ---------------------------------------------------------------------------
+
+
+FULLY_EXPLORED = DiscoveryOutcome(
+    sufficient=True,
+    exhausted=True,
+    missing_document_groups=(),
+)
+
+
+BUDGET_RAN_OUT = DiscoveryOutcome(
+    sufficient=False,
+    exhausted=False,
+    missing_document_groups=("key_information",),
+)
+
+
+REPORTING_UNREACHED = DiscoveryOutcome(
+    sufficient=False,
+    exhausted=False,
+    missing_document_groups=("reporting_document",),
+)
+
+
+def test_an_absent_field_on_a_fully_explored_site_is_not_a_crawling_problem() -> None:
+    """
+    The site was walked to the end and published everything expected.
+
+    The field is absent because the fund does not state it, and no
+    budget changes that.
+    """
+
+    assert (
+        select_deep_pass_funds(
+            output_records=[output_record(minimum_investment="not_found")],
+            discovery_outcomes={FUND_ID: FULLY_EXPLORED},
+        )
+        == []
+    )
+
+
+def test_an_absent_priority_field_counts_while_documents_remain_unreached() -> None:
+    plans = select_deep_pass_funds(
+        output_records=[output_record(minimum_investment="not_found")],
+        discovery_outcomes={FUND_ID: BUDGET_RAN_OUT},
+    )
+
+    assert len(plans) == 1
+
+    assert plans[0].reasons[0].trigger is DeepPassTrigger.FIELD_UNANSWERED
+
+
+def test_a_value_that_could_not_be_confirmed_always_counts() -> None:
+    """A better source can still settle an ambiguous value."""
+
+    plans = select_deep_pass_funds(
+        output_records=[output_record(target_return="ambiguous")],
+        discovery_outcomes={FUND_ID: FULLY_EXPLORED},
+    )
+
+    assert len(plans) == 1
+
+    assert plans[0].reasons[0].trigger is DeepPassTrigger.VALUE_UNCONFIRMED
+
+
+def test_a_missing_series_alone_does_not_send_a_fund_back_out() -> None:
+    """
+    Most funds publish no annual-return table at all.
+
+    Treating that absence as a crawling gap selected almost every fund
+    and recovered almost nothing, so a series needs evidence that the
+    documents carrying it were never reached.
+    """
+
+    assert (
+        select_deep_pass_funds(
+            output_records=[
+                output_record(
+                    annual_returns="not_found",
+                    historical_values="not_found",
+                    aum_history="not_found",
+                )
+            ],
+            discovery_outcomes={
+                FUND_ID: DiscoveryOutcome(
+                    sufficient=True,
+                    exhausted=False,
+                    missing_document_groups=(),
+                )
+            },
+        )
+        == []
+    )
+
+
+def test_a_missing_series_counts_when_its_reporting_sources_were_unreached() -> None:
+    plans = select_deep_pass_funds(
+        output_records=[output_record(annual_returns="not_found")],
+        discovery_outcomes={FUND_ID: REPORTING_UNREACHED},
+    )
+
+    assert len(plans) == 1
+
+    assert plans[0].reasons[0].trigger is DeepPassTrigger.SERIES_SOURCES_UNREACHED
+
+    assert DocumentType.ANNUAL_REPORT in plans[0].wanted_document_types
+
+
+def test_without_a_discovery_outcome_the_cautious_reading_is_used() -> None:
+    """A caller that supplies no evidence keeps the previous behaviour."""
+
+    plans = select_deep_pass_funds(
+        output_records=[output_record(fees="not_found")],
+    )
+
+    assert len(plans) == 1
+
+
+def test_priority_fields_outrank_supporting_fields_and_series() -> None:
+    """A capped deep pass has to spend its budget where it matters."""
+
+    priority = select_deep_pass_funds(
+        output_records=[output_record(fees="not_found")],
+        discovery_outcomes={FUND_ID: BUDGET_RAN_OUT},
+    )[0]
+
+    supporting = select_deep_pass_funds(
+        output_records=[output_record(manager="not_found")],
+        discovery_outcomes={FUND_ID: BUDGET_RAN_OUT},
+    )[0]
+
+    series = select_deep_pass_funds(
+        output_records=[output_record(annual_returns="not_found")],
+        discovery_outcomes={FUND_ID: REPORTING_UNREACHED},
+    )[0]
+
+    assert priority.priority > supporting.priority > series.priority
+
+
+def test_the_selection_is_ordered_by_priority() -> None:
+    weak = output_record(annual_returns="not_found")
+
+    weak["fund_id"] = "fund_0000000000000002"
+
+    weak["name"] = "Weak Fund SICAV a.s."
+
+    strong = output_record(
+        fees="not_found",
+        minimum_investment="not_found",
+        target_return="not_found",
+    )
+
+    plans = select_deep_pass_funds(
+        output_records=[weak, strong],
+        discovery_outcomes={
+            FUND_ID: BUDGET_RAN_OUT,
+            "fund_0000000000000002": REPORTING_UNREACHED,
+        },
+    )
+
+    assert [plan.fund_id for plan in plans] == [FUND_ID, "fund_0000000000000002"]
+
+    assert plans[0].priority > plans[1].priority

@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections import Counter
 from pathlib import Path
+from time import perf_counter
 from typing import Annotated
 
 import typer
@@ -12,6 +13,7 @@ from fundscraper.config import (
     ConfigurationError,
     HttpSettings,
 )
+from fundscraper.crawl_planning import CrawlPass
 from fundscraper.crawl_service import (
     CrawlError,
     CrawlSummary,
@@ -25,6 +27,14 @@ from fundscraper.database import (
     register_funds,
     reset_database,
     validate_database,
+)
+from fundscraper.delivery_export import (
+    DeliveryExportError,
+    build_delivery_records,
+    delivery_summary,
+    load_audit_findings,
+    load_records,
+    write_delivery_output,
 )
 from fundscraper.discovery_service import (
     DiscoverySummary,
@@ -2522,6 +2532,25 @@ def two_pass_command(
             help="Run only the fast pass and report what the deep pass would do.",
         ),
     ] = False,
+    deep_limit: Annotated[
+        int,
+        typer.Option(
+            "--deep-limit",
+            min=0,
+            help=(
+                "Crawl at most this many funds in the deep pass, "
+                "highest priority first. 0 means every selected fund."
+            ),
+        ),
+    ] = 0,
+    progress_every: Annotated[
+        int,
+        typer.Option(
+            "--progress-every",
+            min=1,
+            help="Print a progress line every N funds.",
+        ),
+    ] = 10,
     force: Annotated[
         bool,
         typer.Option(
@@ -2573,6 +2602,43 @@ def two_pass_command(
 
         settings = HttpSettings.from_environment()
 
+        started = perf_counter()
+
+        def show_progress(
+            crawl_pass: CrawlPass,
+            done: int,
+            total: int,
+            result: FundPipelineResult,
+        ) -> None:
+            # One line every few funds, never one per request. A run of
+            # several hundred funds otherwise buries its own summary.
+            if done % progress_every and done != total:
+                return
+
+            elapsed = perf_counter() - started
+
+            label = crawl_pass.value.upper()
+
+            line = (
+                f"{label} {done}/{total} | fund={result.fund_name[:34]} "
+                f"| pages={result.pages_visited} | docs={result.documents_downloaded} "
+                f"| elapsed={_duration(elapsed)}"
+            )
+
+            if crawl_pass is CrawlPass.DEEP:
+                targets = ",".join(
+                    sorted(wanted_by_fund.get(result.fund_id, ()))[:4],
+                )
+
+                line = (
+                    f"{label} {done}/{total} | fund={result.fund_name[:34]} "
+                    f"| targets={targets or '-'}"
+                )
+
+            typer.echo(line)
+
+        wanted_by_fund: dict[str, tuple[str, ...]] = {}
+
         async def run() -> tuple[TwoPassSummary, int, int]:
             async with HttpFetcher(
                 settings,
@@ -2594,6 +2660,8 @@ def two_pass_command(
                         "conflicts",
                     ),
                     skip_deep_pass=skip_deep_pass,
+                    deep_limit=deep_limit,
+                    progress=show_progress,
                     concurrency=concurrency,
                     force=force,
                     avant_fallback=avant_fallback,
@@ -2633,7 +2701,10 @@ def two_pass_command(
 
     deep = summary.deep_metrics
 
+    runtime = (summary.finished_at - summary.started_at).total_seconds()
+
     typer.echo("")
+    typer.echo(f"Runtime: {_duration(runtime)}")
     typer.echo(f"Canonical funds registered: {summary.canonical_funds}")
     typer.echo(
         f"Fast pass:  {fast.funds} funds, {fast.pages_visited} pages, "
@@ -2641,16 +2712,86 @@ def two_pass_command(
     )
     typer.echo(f"Deep pass selected: {len(summary.plans)} funds")
     typer.echo(
-        f"Deep pass:  {deep.funds} funds, {deep.pages_visited} pages, "
+        f"Deep pass executed: {deep.funds} funds, {deep.pages_visited} pages, "
         f"{deep.documents_downloaded} documents"
     )
     typer.echo(
         f"Superseded copies skipped: {fast.superseded_documents + deep.superseded_documents}"
     )
+    typer.echo(
+        f"Expected sitemap misses: {fast.expected_misses + deep.expected_misses}"
+        f" | warnings: {fast.warnings + deep.warnings}"
+        f" | real failures: {fast.real_failures + deep.real_failures}"
+    )
     typer.echo(f"HTTP cache: {cache_hits} hits, {cache_misses} misses")
     typer.echo(f"Recovered fields: {len(summary.recovered_fields)}")
+
+    stages = ", ".join(
+        f"{name}={_duration(value)}"
+        for name, value in (
+            ("discovery", fast.discovery_seconds + deep.discovery_seconds),
+            ("crawl", fast.crawl_seconds + deep.crawl_seconds),
+            ("parse", fast.parse_seconds + deep.parse_seconds),
+            ("extract", fast.extract_seconds + deep.extract_seconds),
+        )
+    )
+
+    typer.echo(f"Fund time by stage: {stages}")
+
+    slowest = sorted(
+        summary.fast_results + summary.deep_results,
+        key=lambda item: -item.duration_seconds,
+    )[:5]
+
+    if slowest:
+        typer.echo("")
+        typer.echo("Slowest funds:")
+
+        for item in slowest:
+            typer.echo(
+                f"  {_duration(item.duration_seconds):>8}  {item.fund_name[:44]:46s}"
+                f" parse={_duration(item.timings.parse)}"
+                f" extract={_duration(item.timings.extract)}"
+            )
+
+    triggers: Counter[str] = Counter(
+        reason.trigger.value for plan in summary.plans for reason in plan.reasons
+    )
+
+    if triggers:
+        typer.echo("")
+        typer.echo("Top deep-pass trigger reasons:")
+
+        for trigger, count in triggers.most_common(5):
+            typer.echo(f"  {trigger:32s}{count}")
+
+    typer.echo("")
     typer.echo(f"Output file: {summary.output_path}")
     typer.echo(f"Report file: {report_path}")
+
+
+def _duration(
+    seconds: float,
+) -> str:
+    """Return a duration a reader can compare at a glance."""
+
+    minutes, remaining = divmod(
+        int(seconds),
+        60,
+    )
+
+    hours, minutes = divmod(
+        minutes,
+        60,
+    )
+
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+
+    if minutes:
+        return f"{minutes}m{remaining:02d}s"
+
+    return f"{remaining}s"
 
 
 def _two_pass_selection(
@@ -2692,3 +2833,102 @@ def _report_section(
         return []
 
     return [item for item in section if isinstance(item, dict)]
+
+
+@app.command("export-delivery")
+def export_delivery_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Internal auditable output to convert.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/output/funds.full.json"),
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Clean delivery JSON to write.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.delivery.json"),
+    audit_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--audit",
+            help=(
+                "Audit report. When given, any field the audit doubts is "
+                "delivered as not_found, which is the conservative export."
+            ),
+            dir_okay=False,
+        ),
+    ] = None,
+    include_source_url: Annotated[
+        bool,
+        typer.Option(
+            "--source-url/--no-source-url",
+            help="Keep the document address of a delivered value.",
+        ),
+    ] = True,
+) -> None:
+    """
+    Write the clean delivery JSON derived from the internal output.
+
+    The internal file is only read. Each field becomes a status and a
+    value; nothing about how the value was found crosses over.
+    """
+
+    resolved_input = input_path.resolve()
+
+    resolved_output = output_path.resolve()
+
+    if resolved_input == resolved_output:
+        typer.echo(
+            "The delivery output must not overwrite the internal output.",
+            err=True,
+        )
+
+        raise typer.Exit(code=1)
+
+    try:
+        records = load_records(resolved_input)
+
+        findings = load_audit_findings(
+            audit_path.resolve() if audit_path is not None else None,
+        )
+
+        delivered = build_delivery_records(
+            records=records,
+            audit_findings=findings,
+            include_source_url=include_source_url,
+        )
+
+        write_delivery_output(
+            records=delivered,
+            path=resolved_output,
+        )
+    except DeliveryExportError as exc:
+        typer.echo(
+            f"Delivery export failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    counts = delivery_summary(delivered)
+
+    typer.echo(f"Internal input: {resolved_input}")
+    typer.echo(f"Delivery output: {resolved_output}")
+    typer.echo(f"Funds: {len(delivered)}")
+    typer.echo(
+        "Audit applied: " + (f"{audit_path} ({len(findings)} findings)" if audit_path else "no")
+    )
+    typer.echo("")
+    typer.echo("Delivered values per field:")
+
+    for field, count in counts.items():
+        typer.echo(f"  {field:26s}{count:>6}")

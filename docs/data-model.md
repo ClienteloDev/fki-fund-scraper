@@ -117,6 +117,50 @@ uv run fundscraper validate-output data/output/funds.full.json
 
 `validate-output` validates against the model itself, not against a schema file.
 
+## Delivery model
+
+`delivery_export.py` derives a second, much smaller file from the internal output. It is a
+different contract, meant for colleagues, an API or a frontend, and it is produced by
+`export-delivery` — never written by the pipeline.
+
+Each fund is `name`, `web` and the eleven `DELIVERY_FIELDS`. Each field is:
+
+```json
+{ "status": "found", "value": { ... }, "source_url": "https://..." }
+```
+
+or
+
+```json
+{ "status": "not_found", "value": null }
+```
+
+`source_url` is the one piece of provenance that crosses over, and `--no-source-url` drops
+it. Only `found` and `not_found` exist; `ambiguous`, `conflicting`, `error` and `pending`
+all become `not_found`.
+
+What each value may contain is an **allowlist** per structure (`_FEE_ITEM_KEYS`,
+`_CAPITAL_OBSERVATION_KEYS`, and so on), so a field added to `output_models.py` later stays
+out of the delivery until somebody decides it belongs. Deliberately excluded: `fund_id`,
+`identity`, `raw_value`, `scope`, `extraction`, `attempted_sources`, `reason`, quotes,
+pages, sections, hashes, retrieval timestamps, `relation_confidence`, and the free-text
+`basis` and `details` a fee keeps when the wording could not be normalized.
+
+The dated series keep their observations as structured rows so a chart can still be drawn:
+`aum_history.observations`, `annual_returns.observations` and
+`historical_values.series[].observations`. Fee items keep their type, rate, fixed amount,
+currency, frequency, maximum flag, min/max band, negotiable flag, condition and their full
+`tiers`.
+
+With an audit report supplied, any field the audit calls `suspicious`, `conflicting`,
+`rejected` or `missing` is withheld as `not_found`. A field the audit says nothing about is
+valid and may be delivered.
+
+Three delivery-shaped schemas now exist; see the JSON Schema table above.
+`schemas/delivery-output.schema.json` describes an **older** five-field contract produced by
+`scripts/export_delivery_output.py`, which carries a `reason` object and `retrieved_at` and
+is not the format described here.
+
 ## Database
 
 SQLite, `SCHEMA_VERSION = 5`, created and migrated additively by `initialize_database`.

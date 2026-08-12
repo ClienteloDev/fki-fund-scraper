@@ -189,6 +189,14 @@ Add `--avant-fallback --amista-fallback` to allow the external adapters when off
 discovery falls short. Add `--anydoc-fallback` only if you want the optional layout parser;
 its values stay `review_required` and below high confidence.
 
+`--deep-limit N` caps the second pass at the N highest-priority funds, which is how a run
+stays affordable when the selection is large. `--progress-every N` sets how often a progress
+line is printed (default every 10 funds).
+
+The end-of-run summary reports the runtime, both passes, how many funds were selected versus
+executed, expected sitemap misses against real failures, cache hits and misses, the five
+slowest funds with their stage breakdown, and the top deep-pass trigger reasons.
+
 Run it detached and expect hours. Test a handful of funds first:
 
 ```powershell
@@ -215,7 +223,29 @@ uv run fundscraper db-status --database cache/fundscraper.sqlite3
 Compare the audit before and after: `summary.by_status`, `summary.weakest_fields` and
 `summary.by_reason` are the three that answer "did this run help".
 
-## 11. Recovery and safety notes
+## 11. Delivery export
+
+Derive the clean file colleagues and the frontend consume. The internal output is only read.
+
+```powershell
+uv run fundscraper export-delivery `
+    --input data/output/funds.full.json `
+    --output data/output/funds.delivery.json
+```
+
+Conservative variant — every field the audit doubts is withheld:
+
+```powershell
+uv run fundscraper export-delivery `
+    --input data/output/funds.full.json `
+    --output data/output/funds.delivery.json `
+    --audit reports/output-audit.step4.json
+```
+
+Run the audit first so the report matches the current output. The command refuses to write
+over its own input, so it cannot damage `funds.full.json`.
+
+## 12. Recovery and safety notes
 
 **A run was interrupted.** Nothing is lost. `cache/http` and `cache/parsed` keep everything
 already fetched and parsed, and a rerun skips them. Re-running the same command resumes in
@@ -229,6 +259,11 @@ always be rebuilt without crawling.
 fund's `processing.warnings`. Look at the `attempts` table for the stage, then rerun the
 single fund with `run-fund` or the individual stage command.
 
+**The run reports hundreds of failures.** Check the split first: the summary separates
+expected sitemap misses from warnings and real failures. Discovery guesses `/robots.txt` and
+three sitemap addresses for every site, and most sites publish none of them. Only the
+`real failures` number is worth acting on.
+
 **A site blocks or throttles.** Lower `HTTP_REQUESTS_PER_SECOND` and
 `HTTP_PER_DOMAIN_CONCURRENCY` rather than the global concurrency. `robots.txt` is honoured
 by default.
@@ -241,7 +276,7 @@ re-downloads everything.
 **Long runs on Windows.** Long-running commands are best started detached, writing to a log
 file, and polled — a foreground shell may time out before a full-dataset run finishes.
 
-## 12. Legacy entry points
+## 13. Legacy entry points
 
 `scripts/run_mvp_final.py`, `scripts/run-mvp-final.ps1`, `scripts/run-docker-mvp.ps1`,
 `Dockerfile` and `compose.yaml` implement the older single-pass MVP flow

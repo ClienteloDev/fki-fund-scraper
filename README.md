@@ -40,7 +40,8 @@ The commands in this README are the current, verified way to run the project.
 | Purpose | Path |
 | --- | --- |
 | Canonical input | `data/input/funds.json` |
-| Current full output | `data/output/funds.full.json` |
+| Current full output (internal, auditable) | `data/output/funds.full.json` |
+| Clean delivery output | `data/output/funds.delivery.json` |
 | Processing database | `cache/regen.sqlite3` |
 | HTTP response cache | `cache/http` |
 | Parsed document cache | `cache/parsed` |
@@ -121,12 +122,34 @@ uv run fundscraper two-pass `
 ```
 
 Useful options: `--limit` / `--offset` / `--fund-id` to crawl a subset, `--skip-deep-pass`
-to report the deep-pass selection without crawling it, `--avant-fallback`
-`--amista-fallback` to allow the external adapters, `--anydoc-fallback` to enable the
-optional layout parser. The canonical fund list is always registered in full, so limiting a
-run to a sample never shrinks the database or the output file.
+to report the deep-pass selection without crawling it, `--deep-limit N` to cap the second
+pass at the N highest-priority funds, `--progress-every N` for progress lines,
+`--avant-fallback` `--amista-fallback` to allow the external adapters, `--anydoc-fallback`
+to enable the optional layout parser. The canonical fund list is always registered in full,
+so limiting a run to a sample never shrinks the database or the output file.
 
 See [docs/crawler.md](docs/crawler.md) for budgets and selection rules.
+
+## Delivery export
+
+`funds.full.json` is the internal, auditable record: every value carries its document,
+quote, page, scope, confidence and refused alternatives. The delivery file is derived from
+it and carries only the business data — each field is a `status`, a `value` and optionally
+the `source_url`.
+
+```powershell
+uv run fundscraper export-delivery `
+    --input data/output/funds.full.json `
+    --output data/output/funds.delivery.json
+```
+
+Pass `--audit reports/output-audit.step4.json` for the conservative export: any field the
+audit calls suspicious, conflicting or rejected is delivered as `not_found` with a null
+value. `--no-source-url` drops the document address as well. The command only reads the
+internal file and refuses to write over it.
+
+Only `found` and `not_found` appear in the delivery format; `ambiguous`, `conflicting`,
+`error` and `pending` all become `not_found` with a null value. Nothing is invented.
 
 ## Output audit
 
@@ -181,6 +204,7 @@ src/fundscraper/       application package
   extended_validation  the single validation rule vocabulary (Step 4)
   conflict_resolution  deterministic source comparison (Step 8)
   output_audit         the final audit over a delivered file
+  delivery_export      the clean output for colleagues, API and frontend
   database             SQLite schema and repositories
   cli                  Typer command line
 scripts/               offline analysis and reporting entry points

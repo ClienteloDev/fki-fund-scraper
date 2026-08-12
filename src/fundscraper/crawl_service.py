@@ -35,6 +35,7 @@ from fundscraper.output_service import (
 from fundscraper.site_crawler import (
     discover_navigation_links,
 )
+from fundscraper.sitemap_discovery import is_sitemap_address
 
 
 class CrawlError(RuntimeError):
@@ -189,6 +190,12 @@ async def crawl_fund_site(
             continue
 
         pages_visited += 1
+
+        if is_sitemap_address(result.final_url):
+            # A sitemap is how a site describes itself, not something the
+            # fund published. Recording it as a source sent it to the
+            # document parser and then to extraction.
+            continue
 
         upsert_source(
             database_path,

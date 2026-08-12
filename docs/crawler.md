@@ -27,8 +27,8 @@ Passing no budget keeps the historical defaults (`max_pages=25`, `max_depth=2`,
 
 ## Selecting the deep pass
 
-`select_deep_pass_funds(output_records, audit_findings, conflict_records)` reads three
-inputs, each answering a different question:
+`select_deep_pass_funds(output_records, audit_findings, conflict_records,
+discovery_outcomes)` reads four inputs, each answering a different question:
 
 - the **delivered output** — which fields have no answer: status `pending`, `not_found`,
   `ambiguous`, `conflicting` or `error` (`UNANSWERED_STATUSES`);
@@ -39,13 +39,40 @@ inputs, each answering a different question:
   `manager_level_scope`, `scope_mismatch`, `only_manager_level_data`). "The amount is
   implausibly small" says the number was misread, and re-crawling will not change it;
 - the **Step 8 conflict report** — which fields two *different sources* disagree about.
-  A conflict whose alternatives share one URL is skipped.
+  A conflict whose alternatives share one URL is skipped;
+- the **discovery outcome of the first pass** (`DiscoveryOutcome`) — whether anything is
+  left to find at all: `sufficient` (every required group found), `exhausted` (the walk ran
+  out of pages rather than budget) and `missing_document_groups`.
 
 `TRIGGER_FIELDS` is the ten fields that may trigger a pass. **`news` is deliberately absent**:
 an announcement page nobody publishes is not a reason to spend forty page fetches.
 
+### Evidence gating
+
+A field with no answer is only a crawling problem while there is somewhere left to look.
+`_unanswered_trigger` applies three rules:
+
+- a value that was **found but not confirmed** (`ambiguous`, `conflicting`, `error`) always
+  counts — a better source can still settle it (`VALUE_UNCONFIRMED`);
+- an **absent priority or supporting field** counts unless the site was both explored to the
+  end and found to publish everything expected; on such a site the field is absent because
+  the fund does not state it (`FIELD_UNANSWERED`);
+- an **absent historical series** counts only when the `reporting_document` group was never
+  reached (`SERIES_SOURCES_UNREACHED`). Across the current data set the dated series are
+  found for a small minority of funds, so their simple absence describes the market rather
+  than a gap in the crawl. Treating it as a gap selected almost every fund and recovered
+  almost nothing.
+
+### Priority
+
+`PRIORITY_FIELDS` (`minimum_investment`, `target_return`, `fees`,
+`assets_under_management`) weigh 10 each, `SUPPORTING_FIELDS` (`investment_horizon`,
+`manager`, `administrator`) 3, and `HISTORICAL_SERIES_FIELDS` 1. `DeepPassPlan.priority`
+sums them and the selection is returned strongest first, so `--deep-limit N` keeps the funds
+whose missing fields matter most.
+
 Each selected fund gets a `DeepPassPlan` with its `reasons` (field, `DeepPassTrigger`,
-detail) and its `wanted_document_types`.
+detail), its `priority` and its `wanted_document_types`.
 
 ## Field-aware deep crawling
 
@@ -115,8 +142,17 @@ uv run fundscraper two-pass `
     --concurrency 6
 ```
 
-Options: `--limit`, `--offset`, `--fund-id` (repeatable), `--skip-deep-pass`, `--force`,
-`--avant-fallback`, `--amista-fallback`, `--porovnejfondy-fallback`, `--anydoc-fallback`.
+Options: `--limit`, `--offset`, `--fund-id` (repeatable), `--skip-deep-pass`,
+`--deep-limit`, `--progress-every`, `--force`, `--avant-fallback`, `--amista-fallback`,
+`--porovnejfondy-fallback`, `--anydoc-fallback`.
+
+`--deep-limit N` crawls at most N funds in the deep pass, highest priority first.
+`--progress-every N` prints one progress line every N funds:
+
+```text
+FAST 120/341 | fund=Example SICAV a.s. | pages=8 | docs=12 | elapsed=1h04m
+DEEP 18/74 | fund=Example SICAV a.s. | targets=annual_report,factsheet
+```
 
 `--skip-deep-pass` still selects the funds that would be crawled again and reports them
 under `deep_pass_selection`, but crawls none of them: `deep_pass.funds` is zero and no
@@ -131,6 +167,36 @@ superseded copies skipped, failures, fund-seconds) with a per-fund breakdown inc
 `official_sources_sufficient` and `official_missing_document_groups`, the deep-pass selection
 with fields, triggers and wanted document types, the fields the deep pass recovered, and the
 failures per fund.
+
+## Expected misses, warnings and failures
+
+Discovery guesses `/robots.txt` and three conventional sitemap addresses for every site,
+because one of them hands over the whole document list for a single request. Most sites
+publish none, and `run_diagnostics.classify_fetch_failure` files the resulting 404 as an
+`expected_miss` rather than a failure. A full first pass reported 874 "failures", of which
+474 were those guesses and exactly one was a `MemoryError`.
+
+| Level | What it means |
+| --- | --- |
+| `expected_miss` | a guessed optional address answered 403/404/410 |
+| `warning` | a document-level problem: a linked file that 404s, one 5xx, a document that will not parse |
+| `failure` | an unexpected error, a parser crash, or repeated 5xx from one host (`escalate_repeated_server_errors`) |
+
+The counts appear per pass in the report (`expected_misses`, `warnings`, `real_failures`)
+and per fund under `diagnostics`. `warnings` on `OfficialDiscoveryResult` keeps only what
+deserves attention; nothing is discarded, and every diagnostic stays in `diagnostics`.
+
+Sitemap addresses are also kept out of the document path entirely: they are excluded from
+`navigation_urls` and skipped by the crawler when it records a page as a source. A full run
+parsed 1 079 sitemap files as if they were fund documents — 11 per cent of everything it
+parsed, one of them 140 000 characters and re-parsed once per fund of a shared manager
+domain.
+
+## Where the time goes
+
+`StageTimings` on `FundPipelineResult` records `discovery`, `crawl`, `parse` and `extract`
+seconds per fund. The report carries per-pass `stage_seconds`, the ten `slowest_funds` with
+their breakdown, and per-fund `stage_seconds` in `funds_detail`.
 
 ## Limitations
 

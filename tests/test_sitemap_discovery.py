@@ -6,6 +6,7 @@ from fundscraper.sitemap_discovery import (
     candidate_sitemap_urls,
     filter_sitemap_entries,
     is_allowed,
+    is_sitemap_address,
     parse_sitemap,
     robots_disallowed_paths,
     robots_sitemap_urls,
@@ -204,3 +205,30 @@ def test_offers_the_well_known_sitemap_addresses() -> None:
     )
 
     assert candidate_sitemap_urls("not-a-url") == ()
+
+
+def test_recognises_the_addresses_that_describe_a_site() -> None:
+    """
+    A sitemap is a discovery artefact, never a fund document.
+
+    A full run parsed 1 079 of them as if they were documents, 11 per
+    cent of everything it parsed, including a 140 000 character file
+    read once per fund of a shared manager domain.
+    """
+
+    for address in (
+        "https://example.cz/sitemap.xml",
+        "https://example.cz/sitemap_index.xml",
+        "https://example.cz/wp-sitemap.xml",
+        "https://www.avantfunds.cz/oznameni-sitemap.xml",
+        "https://example.cz/robots.txt",
+        "https://example.cz/SITEMAP.XML",
+    ):
+        assert is_sitemap_address(address), address
+
+    for address in (
+        "https://example.cz/dokumenty/statut.pdf",
+        "https://example.cz/pro-investory/",
+        "https://example.cz/data/3157004TYW5DXG2FXX14-2021-12-31-cs.xhtml",
+    ):
+        assert not is_sitemap_address(address), address

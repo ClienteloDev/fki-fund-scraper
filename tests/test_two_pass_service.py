@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -61,6 +62,8 @@ def run(
     tmp_path: Path,
     selected: list[FundInput],
     skip_deep_pass: bool,
+    deep_limit: int = 0,
+    progress: Any = None,
 ) -> tuple[TwoPassSummary, Path, Path]:
     database_path = tmp_path / "two-pass.sqlite3"
 
@@ -97,6 +100,8 @@ def run(
                 fetcher=fetcher,
                 concurrency=1,
                 skip_deep_pass=skip_deep_pass,
+                deep_limit=deep_limit,
+                progress=progress,
             )
 
     return (
@@ -208,3 +213,75 @@ def test_the_report_records_both_passes_and_the_selection(
     assert payload["deep_pass_selection"]
 
     assert payload["deep_pass_selection"][0]["fields"]
+
+
+def test_the_deep_pass_can_be_capped_to_the_most_valuable_funds(
+    tmp_path: Path,
+) -> None:
+    """
+    A run that selects almost every fund still has to be affordable.
+
+    The plans are ordered by priority, so a cap keeps the funds whose
+    missing fields matter most rather than an arbitrary prefix.
+    """
+
+    summary, _, _ = run(
+        tmp_path=tmp_path,
+        selected=CANONICAL,
+        skip_deep_pass=False,
+        deep_limit=2,
+    )
+
+    assert len(summary.plans) == 2
+
+    assert summary.deep_metrics.funds == 2
+
+    # Ordered strongest first.
+    assert summary.plans[0].priority >= summary.plans[1].priority
+
+
+def test_progress_is_reported_for_both_passes(
+    tmp_path: Path,
+) -> None:
+    seen: list[tuple[str, int, int]] = []
+
+    run(
+        tmp_path=tmp_path,
+        selected=[CANONICAL[0]],
+        skip_deep_pass=False,
+        progress=lambda crawl_pass, done, total, result: seen.append(
+            (crawl_pass.value, done, total)
+        ),
+    )
+
+    assert ("fast", 1, 1) in seen
+
+    assert ("deep", 1, 1) in seen
+
+
+def test_the_stage_timings_are_recorded(
+    tmp_path: Path,
+) -> None:
+    """Eleven hours of runtime is only explainable if each stage is timed."""
+
+    summary, _, _ = run(
+        tmp_path=tmp_path,
+        selected=[CANONICAL[0]],
+        skip_deep_pass=True,
+    )
+
+    timings = summary.fast_results[0].timings
+
+    assert timings.total > 0
+
+    assert timings.as_dict().keys() == {
+        "discovery",
+        "crawl",
+        "parse",
+        "extract",
+        "measured_total",
+    }
+
+    # The measured stages account for essentially all of the fund's wall
+    # clock, so a slow fund can be attributed to a stage.
+    assert timings.total <= summary.fast_results[0].duration_seconds + 0.5

@@ -60,6 +60,12 @@ from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_domain, canonical_url
 from fundscraper.output_models import DocumentType
 from fundscraper.output_service import stable_fund_id
+from fundscraper.run_diagnostics import (
+    Diagnostic,
+    DiagnosticLevel,
+    classify_fetch_failure,
+    escalate_repeated_server_errors,
+)
 from fundscraper.site_crawler import anchor_text as read_anchor_text
 from fundscraper.sitemap_discovery import (
     MAXIMUM_SITEMAP_DEPTH,
@@ -67,6 +73,7 @@ from fundscraper.sitemap_discovery import (
     candidate_sitemap_urls,
     filter_sitemap_entries,
     is_allowed,
+    is_sitemap_address,
     parse_sitemap,
     robots_disallowed_paths,
     robots_sitemap_urls,
@@ -253,6 +260,11 @@ class OfficialDiscoveryResult:
     metrics: OfficialDiscoveryMetrics
     warnings: tuple[str, ...]
 
+    # Everything the stage recorded, with an expected miss told apart
+    # from something that went wrong. ``warnings`` keeps only the lines
+    # that are worth a reader's attention.
+    diagnostics: tuple[Diagnostic, ...] = ()
+
     # The document types this pass was sent out to find, if any. They
     # count towards sufficiency next to the groups every fund needs.
     wanted_document_types: frozenset[DocumentType] = frozenset()
@@ -345,13 +357,21 @@ async def discover_official_sources(
             entries=(),
             metrics=OfficialDiscoveryMetrics(),
             warnings=("no official website is known for this fund",),
+            diagnostics=(
+                Diagnostic(
+                    level=DiagnosticLevel.WARNING,
+                    stage="discovery",
+                    code="no_official_website",
+                    message=("no official website is known for this fund"),
+                ),
+            ),
         )
 
     official_domain = canonical_domain(fund.web)
 
     entries: list[DiscoveryEntry] = []
 
-    warnings: list[str] = []
+    diagnostics: list[Diagnostic] = []
 
     documents: dict[str, DiscoveredLink] = {}
 
@@ -456,6 +476,8 @@ async def discover_official_sources(
 
     disallowed: tuple[str, ...] = ()
 
+    guessed_addresses: set[str] = set()
+
     robots_address = robots_url(fund.web)
 
     if robots_address is not None:
@@ -463,7 +485,8 @@ async def discover_official_sources(
             fetcher=fetcher,
             url=robots_address,
             force=force,
-            warnings=warnings,
+            diagnostics=diagnostics,
+            guessed=True,
         )
 
         if robots_result is not None:
@@ -482,6 +505,10 @@ async def discover_official_sources(
                 )
 
     for sitemap_address in candidate_sitemap_urls(fund.web):
+        # Invented, not linked. A site that does not publish it owes
+        # nobody an explanation, so its 404 is an expected miss.
+        guessed_addresses.add(canonical_url(sitemap_address))
+
         enqueue(
             url=sitemap_address,
             score=190,
@@ -533,7 +560,8 @@ async def discover_official_sources(
             fetcher=fetcher,
             url=url,
             force=force,
-            warnings=warnings,
+            diagnostics=diagnostics,
+            guessed=canonical_url(url) in guessed_addresses,
         )
 
         if fetched is None:
@@ -668,8 +696,16 @@ async def discover_official_sources(
         )
     )
 
+    # A sitemap has already been read by this stage. Handing it to the
+    # crawler as a page made it fetch the file again, store it as a
+    # source and send it to the document parser: eleven per cent of all
+    # parsed documents in a full run were sitemaps, one of them 140 000
+    # characters wide and parsed once per fund of a shared manager
+    # domain.
     navigation_urls = tuple(
-        entry.url for entry in entries if entry.accepted and not entry.is_document
+        entry.url
+        for entry in entries
+        if entry.accepted and not entry.is_document and not is_sitemap_address(entry.url)
     )
 
     metrics = OfficialDiscoveryMetrics(
@@ -684,14 +720,24 @@ async def discover_official_sources(
         method_counts=dict(sorted(method_counts.items())),
     )
 
+    # One document linked from both the Czech and the English version of
+    # a page is seen twice. The second sighting is a duplicate, but the
+    # discovery log is keyed by URL and upserts, so leaving both in made
+    # the later "duplicate, rejected" row overwrite the earlier accepted
+    # one — a factsheet that was found and downloaded was recorded as
+    # refused. The entries are collapsed before anything reads them.
+    entries = _collapse_entries(entries)
+
     if database_path is not None:
         _persist(
             database_path=database_path,
             fund_id=fund_id,
             entries=entries,
             run_id=run_id,
-            warnings=warnings,
+            diagnostics=diagnostics,
         )
+
+    recorded = escalate_repeated_server_errors(diagnostics)
 
     return OfficialDiscoveryResult(
         fund_id=fund_id,
@@ -701,9 +747,38 @@ async def discover_official_sources(
         documents=ordered_documents,
         entries=tuple(entries),
         metrics=metrics,
-        warnings=tuple(warnings),
+        # An expected miss is not worth a reader's attention, so it stays
+        # out of the warning lines while remaining counted in diagnostics.
+        warnings=tuple(
+            item.rendered() for item in recorded if item.level is not DiagnosticLevel.EXPECTED_MISS
+        ),
+        diagnostics=tuple(recorded),
         wanted_document_types=wanted_document_types,
     )
+
+
+def _collapse_entries(
+    entries: list[DiscoveryEntry],
+) -> list[DiscoveryEntry]:
+    """
+    Keep one entry per address, the one that says what became of it.
+
+    An address that was accepted once was accepted, however many later
+    sightings were skipped as duplicates. Reporting the last sighting
+    instead of the decisive one understated what discovery found.
+    """
+
+    best: dict[str, DiscoveryEntry] = {}
+
+    for entry in entries:
+        key = canonical_url(entry.url)
+
+        current = best.get(key)
+
+        if current is None or (entry.accepted and not current.accepted):
+            best[key] = entry
+
+    return list(best.values())
 
 
 def _covers_what_is_needed(
@@ -1376,15 +1451,37 @@ async def _try_fetch(
     fetcher: HttpFetcher,
     url: str,
     force: bool,
-    warnings: list[str],
+    diagnostics: list[Diagnostic],
+    guessed: bool = False,
 ) -> FetchResult | None:
+    """
+    Fetch one address, recording what happened when it does not answer.
+
+    ``guessed`` says the address was invented by discovery rather than
+    followed from a link, which is what makes a 404 an expected answer
+    instead of a problem.
+    """
+
     try:
         return await fetcher.fetch(
             url,
             force=force,
         )
     except FetchError as exc:
-        warnings.append(f"discovery: {url}: {exc.code}: {exc}")
+        diagnostics.append(
+            Diagnostic(
+                level=classify_fetch_failure(
+                    url=url,
+                    code=exc.code,
+                    status_code=getattr(exc, "status_code", None),
+                    guessed=guessed,
+                ),
+                stage="discovery",
+                code=exc.code,
+                message=str(exc),
+                url=url,
+            )
+        )
 
         return None
 
@@ -1395,7 +1492,7 @@ def _persist(
     fund_id: str,
     entries: list[DiscoveryEntry],
     run_id: str,
-    warnings: list[str],
+    diagnostics: list[Diagnostic],
 ) -> None:
     for entry in entries:
         try:
@@ -1419,6 +1516,14 @@ def _persist(
                 ),
             )
         except DatabaseError as exc:
-            warnings.append(f"discovery log: {entry.url}: {exc}")
+            diagnostics.append(
+                Diagnostic(
+                    level=DiagnosticLevel.WARNING,
+                    stage="discovery log",
+                    code="database_error",
+                    message=str(exc),
+                    url=entry.url,
+                )
+            )
 
             return

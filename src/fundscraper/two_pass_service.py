@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
@@ -33,6 +33,7 @@ from fundscraper.crawl_planning import (
     CrawlBudget,
     CrawlPass,
     DeepPassPlan,
+    DiscoveryOutcome,
     select_deep_pass_funds,
 )
 from fundscraper.database import initialize_database, register_funds
@@ -44,6 +45,19 @@ from fundscraper.pipeline_service import (
     run_fund_pipeline,
     synchronize_output_file,
 )
+from fundscraper.run_diagnostics import DiagnosticLevel
+
+# Called after each fund with the pass, the position, the total and the
+# result, so a caller can print a line without the service knowing how.
+type TwoPassProgress = Callable[
+    [
+        CrawlPass,
+        int,
+        int,
+        FundPipelineResult,
+    ],
+    None,
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +72,15 @@ class PassMetrics:
     superseded_documents: int = 0
     failures: int = 0
     duration_seconds: float = 0.0
+
+    expected_misses: int = 0
+    warnings: int = 0
+    real_failures: int = 0
+
+    discovery_seconds: float = 0.0
+    crawl_seconds: float = 0.0
+    parse_seconds: float = 0.0
+    extract_seconds: float = 0.0
 
     @classmethod
     def of(
@@ -76,6 +99,13 @@ class PassMetrics:
                 sum(item.duration_seconds for item in results),
                 3,
             ),
+            expected_misses=sum(item.expected_misses for item in results),
+            warnings=sum(item.diagnostic_counts[DiagnosticLevel.WARNING.value] for item in results),
+            real_failures=sum(item.real_failures for item in results),
+            discovery_seconds=round(sum(item.timings.discovery for item in results), 1),
+            crawl_seconds=round(sum(item.timings.crawl for item in results), 1),
+            parse_seconds=round(sum(item.timings.parse for item in results), 1),
+            extract_seconds=round(sum(item.timings.extract for item in results), 1),
         )
 
 
@@ -144,6 +174,10 @@ async def run_two_pass(
     run_id: str = "step7",
     # Compute and report the deep-pass selection without crawling it.
     skip_deep_pass: bool = False,
+    # Crawl at most this many funds in the deep pass, highest priority
+    # first. Zero means every selected fund.
+    deep_limit: int = 0,
+    progress: TwoPassProgress | None = None,
 ) -> TwoPassSummary:
     """
     Run the fast pass over the selection, then the deep pass where needed.
@@ -198,11 +232,23 @@ async def run_two_pass(
         anydoc_fallback=anydoc_fallback,
         output_lock=output_lock,
         run_id=f"{run_id}-fast",
+        progress=progress,
     )
 
     crawled_ids = {stable_fund_id(fund) for fund in selected_funds}
 
     before = field_states(load_output(output_path))
+
+    # What the first pass learned about each fund's official sources is
+    # what tells an absent field apart from an unreached document.
+    outcomes = {
+        result.fund_id: DiscoveryOutcome(
+            sufficient=result.official_sources_sufficient,
+            exhausted=result.official_stage_exhausted,
+            missing_document_groups=(result.official_missing_document_groups),
+        )
+        for result in summary.fast_results
+    }
 
     plans = [
         plan
@@ -210,9 +256,15 @@ async def run_two_pass(
             output_records=_records_as_payload(output_path),
             audit_findings=audit_findings,
             conflict_records=conflict_records,
+            discovery_outcomes=outcomes,
         )
         if plan.fund_id in crawled_ids
     ]
+
+    if deep_limit > 0:
+        # The plans are ordered by priority, so a cap keeps the funds
+        # whose missing fields matter most.
+        plans = plans[:deep_limit]
 
     summary.plans = plans
 
@@ -238,6 +290,7 @@ async def run_two_pass(
             anydoc_fallback=anydoc_fallback,
             output_lock=output_lock,
             run_id=f"{run_id}-deep",
+            progress=progress,
         )
 
         after = field_states(load_output(output_path))
@@ -271,6 +324,7 @@ async def _run_pass(
     anydoc_fallback: bool,
     output_lock: asyncio.Lock,
     run_id: str,
+    progress: TwoPassProgress | None = None,
 ) -> list[FundPipelineResult]:
     """Run one pass over a list of funds, at the given budget."""
 
@@ -280,6 +334,10 @@ async def _run_pass(
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
     results: list[FundPipelineResult | None] = [None] * len(funds)
+
+    completed = 0
+
+    progress_lock = asyncio.Lock()
 
     async def run_one(
         index: int,
@@ -306,6 +364,24 @@ async def _run_pass(
                     frozenset(),
                 ),
             )
+
+        if progress is None:
+            return
+
+        nonlocal completed
+
+        async with progress_lock:
+            completed += 1
+
+            finished = results[index]
+
+            if finished is not None:
+                progress(
+                    crawl_pass,
+                    completed,
+                    len(funds),
+                    finished,
+                )
 
     await asyncio.gather(*(run_one(index, fund) for index, fund in enumerate(funds)))
 
@@ -392,6 +468,7 @@ def write_two_pass_report(
             {
                 "fund_id": plan.fund_id,
                 "fund_name": plan.fund_name,
+                "priority": plan.priority,
                 "fields": list(plan.fields),
                 "wanted_document_types": sorted(item.value for item in plan.wanted_document_types),
                 "reasons": [
@@ -461,7 +538,28 @@ def _pass_payload(
         "documents_parsed": metrics.documents_parsed,
         "superseded_documents_skipped": metrics.superseded_documents,
         "failures": metrics.failures,
+        "expected_misses": metrics.expected_misses,
+        "warnings": metrics.warnings,
+        "real_failures": metrics.real_failures,
         "fund_seconds": metrics.duration_seconds,
+        "stage_seconds": {
+            "discovery": metrics.discovery_seconds,
+            "crawl": metrics.crawl_seconds,
+            "parse": metrics.parse_seconds,
+            "extract": metrics.extract_seconds,
+        },
+        "slowest_funds": [
+            {
+                "fund_name": item.fund_name,
+                "duration_seconds": item.duration_seconds,
+                "stage_seconds": item.timings.as_dict(),
+                "documents_parsed": item.documents_parsed,
+            }
+            for item in sorted(
+                results,
+                key=lambda item: -item.duration_seconds,
+            )[:10]
+        ],
         "funds_detail": [
             {
                 "fund_name": item.fund_name,
@@ -473,6 +571,8 @@ def _pass_payload(
                 "official_missing_document_groups": list(item.official_missing_document_groups),
                 "fields_found": item.fields_found,
                 "duration_seconds": item.duration_seconds,
+                "stage_seconds": item.timings.as_dict(),
+                "diagnostics": item.diagnostic_counts,
             }
             for item in results
         ],
