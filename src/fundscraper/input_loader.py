@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
@@ -12,6 +13,41 @@ FUND_LIST_ADAPTER = TypeAdapter(list[FundInput])
 
 class InputFileError(ValueError):
     """Raised when the input fund file cannot be loaded or validated."""
+
+
+def select_funds_by_web(
+    funds: Sequence[FundInput],
+    patterns: Sequence[str],
+) -> list[FundInput]:
+    """
+    Return the funds whose input website contains any of `patterns`.
+
+    Matching is case-insensitive and substring-based, so an administrator
+    or platform can be named without knowing the exact host. Repeated
+    patterns are ORed together.
+
+    A fund whose `web` is unknown never matches: there is nothing to test
+    against, and silently including it would widen a run that was asked
+    to be narrow. With no patterns the selection is every fund, which
+    keeps the caller free of special cases.
+
+    The original input order is preserved, and the input list is never
+    mutated.
+    """
+
+    if not patterns:
+        return list(funds)
+
+    needles = [pattern.casefold() for pattern in patterns if pattern]
+
+    if not needles:
+        return list(funds)
+
+    return [
+        fund
+        for fund in funds
+        if fund.web and any(needle in fund.web.casefold() for needle in needles)
+    ]
 
 
 def load_funds(path: Path) -> list[FundInput]:

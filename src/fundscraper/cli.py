@@ -95,7 +95,7 @@ from fundscraper.http_client import (
     FetchResult,
     HttpFetcher,
 )
-from fundscraper.input_loader import InputFileError, load_funds
+from fundscraper.input_loader import InputFileError, load_funds, select_funds_by_web
 from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_domain, canonical_url
 from fundscraper.official_discovery import (
@@ -2989,3 +2989,209 @@ def export_delivery_command(
 
     for field, count in counts.items():
         typer.echo(f"  {field:26s}{count:>6}")
+
+
+@app.command("acquire-documents")
+def acquire_documents_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="HTTP cache directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help="Directory for the acquisition manifest and report.",
+            file_okay=False,
+        ),
+    ] = None,
+    web_contains: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--web-contains",
+            help=(
+                "Only process funds whose input web contains this text. "
+                "Repeat to OR several values. Case-insensitive."
+            ),
+        ),
+    ] = None,
+    list_selected: Annotated[
+        bool,
+        typer.Option(
+            "--list-selected",
+            help="Print the selected funds and exit without acquiring anything.",
+        ),
+    ] = False,
+    max_pages: Annotated[
+        int,
+        typer.Option(
+            "--max-pages",
+            min=1,
+            max=100,
+        ),
+    ] = 25,
+    max_depth: Annotated[
+        int,
+        typer.Option(
+            "--max-depth",
+            min=0,
+            max=5,
+        ),
+    ] = 2,
+    max_documents: Annotated[
+        int,
+        typer.Option(
+            "--max-documents",
+            min=0,
+            max=100,
+        ),
+    ] = 20,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore cached HTTP responses.",
+        ),
+    ] = False,
+) -> None:
+    """
+    Discover and download documents for a subset of funds.
+
+    This is acquisition only: it visits pages, downloads the documents it
+    finds and records their provenance. It does not parse fields, does
+    not normalise values and does not write any delivery output, so it
+    can be pointed at a scratch database and cache without disturbing the
+    production corpus.
+    """
+
+    try:
+        funds = load_funds(input_path)
+        selected = select_funds_by_web(funds, web_contains or [])
+    except InputFileError as exc:
+        typer.echo(f"Input error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Input funds: {len(funds)}")
+    typer.echo(f"Selected funds: {len(selected)}")
+
+    if web_contains:
+        typer.echo("Filter: web contains " + " OR ".join(sorted(web_contains)))
+
+    if not selected:
+        typer.echo("No fund matched the filter; nothing to do.")
+        return
+
+    if list_selected:
+        for index, fund in enumerate(selected, start=1):
+            typer.echo(f"{index:>4}. {fund.name}  [{fund.web or '-'}]")
+        return
+
+    summaries: list[CrawlSummary] = []
+    failures: list[str] = []
+
+    try:
+        initialize_database(database_path)
+        register_funds(database_path, funds)
+
+        settings = HttpSettings.from_environment()
+
+        async def run_all() -> None:
+            async with HttpFetcher(settings, cache_directory) as fetcher:
+                for position, fund in enumerate(selected, start=1):
+                    typer.echo(f"[{position}/{len(selected)}] {fund.name}")
+                    try:
+                        summaries.append(
+                            await crawl_fund_site(
+                                database_path=database_path,
+                                fund=fund,
+                                fetcher=fetcher,
+                                max_pages=max_pages,
+                                max_depth=max_depth,
+                                max_documents=max_documents,
+                                force=force,
+                            )
+                        )
+                    except (FetchError, CrawlError) as exc:
+                        failures.append(f"{fund.name}: {exc}")
+
+        asyncio.run(run_all())
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        FetchError,
+        CrawlError,
+    ) as exc:
+        typer.echo(f"Acquisition failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    pages = sum(s.pages_visited for s in summaries)
+    discovered = sum(s.documents_discovered for s in summaries)
+    downloaded = sum(s.documents_downloaded for s in summaries)
+    crawl_failures = sum(len(s.failures) for s in summaries)
+
+    typer.echo("")
+    typer.echo(f"Funds processed: {len(summaries)}")
+    typer.echo(f"Pages visited: {pages}")
+    typer.echo(f"Documents discovered: {discovered}")
+    typer.echo(f"Documents downloaded: {downloaded}")
+    typer.echo(f"Crawl failures: {crawl_failures}")
+    typer.echo(f"Funds that raised an error: {len(failures)}")
+
+    for failure in failures:
+        typer.echo(f"- {failure}")
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = {
+            "input": str(input_path),
+            "database": str(database_path),
+            "cache_directory": str(cache_directory),
+            "web_contains": list(web_contains or []),
+            "funds_selected": len(selected),
+            "funds_processed": len(summaries),
+            "pages_visited": pages,
+            "documents_discovered": discovered,
+            "documents_downloaded": downloaded,
+            "crawl_failures": crawl_failures,
+            "fund_errors": failures,
+            "per_fund": [
+                {
+                    "fund_name": s.fund_name,
+                    "pages_visited": s.pages_visited,
+                    "documents_discovered": s.documents_discovered,
+                    "documents_downloaded": s.documents_downloaded,
+                    "failures": len(s.failures),
+                }
+                for s in summaries
+            ],
+        }
+        path = output_dir / "acquisition-summary.json"
+        path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=1) + "\n",
+            encoding="utf-8",
+        )
+        typer.echo(f"Summary: {path}")
