@@ -47,8 +47,7 @@ def read_json(path: Path) -> Any:
         raise DeliveryExportError(f"Input file does not exist: {path}") from exc
     except json.JSONDecodeError as exc:
         raise DeliveryExportError(
-            f"Invalid JSON in {path} at line {exc.lineno}, "
-            f"column {exc.colno}: {exc.msg}"
+            f"Invalid JSON in {path} at line {exc.lineno}, column {exc.colno}: {exc.msg}"
         ) from exc
 
 
@@ -84,9 +83,7 @@ def normalize_datetime(value: Any, label: str) -> str:
     try:
         datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise DeliveryExportError(
-            f"{label} must be an ISO 8601 date or datetime: {text}"
-        ) from exc
+        raise DeliveryExportError(f"{label} must be an ISO 8601 date or datetime: {text}") from exc
 
     return text
 
@@ -100,9 +97,7 @@ def extract_source(field: dict[str, Any], label: str) -> dict[str, str]:
     source = evidence.get("source")
 
     if not isinstance(source, dict):
-        raise DeliveryExportError(
-            f"{label}.source.source must be an object"
-        )
+        raise DeliveryExportError(f"{label}.source.source must be an object")
 
     result = {
         "url": validate_http_url(
@@ -147,10 +142,7 @@ def extract_missing_reason(
         reason_detail = DEFAULT_REASON_DETAILS[internal_status]
 
     if internal_status != "not_found":
-        reason_detail = (
-            f"Internal status was '{internal_status}'. "
-            f"{reason_detail}"
-        )
+        reason_detail = f"Internal status was '{internal_status}'. {reason_detail}"
 
     return {
         "code": reason_code,
@@ -171,10 +163,7 @@ def convert_field(
             "status": "not_found",
             "reason": {
                 "code": "invalid_internal_field",
-                "detail": (
-                    "The internal output did not contain a valid "
-                    f"object for {field_name}."
-                ),
+                "detail": (f"The internal output did not contain a valid object for {field_name}."),
             },
         }
 
@@ -186,8 +175,7 @@ def convert_field(
             "reason": {
                 "code": "invalid_internal_status",
                 "detail": (
-                    "The internal output contained an unsupported "
-                    f"status: {internal_status!r}."
+                    f"The internal output contained an unsupported status: {internal_status!r}."
                 ),
             },
         }
@@ -196,9 +184,7 @@ def convert_field(
         value = field.get("value")
 
         if value is None:
-            raise DeliveryExportError(
-                f"{label} is found but does not contain value"
-            )
+            raise DeliveryExportError(f"{label} is found but does not contain value")
 
         return {
             "status": "found",
@@ -224,17 +210,14 @@ def load_internal_records(path: Path) -> list[dict[str, Any]]:
 
     if not isinstance(payload, list):
         raise DeliveryExportError(
-            "Internal output must be a JSON array or an object "
-            "containing a 'funds' array"
+            "Internal output must be a JSON array or an object containing a 'funds' array"
         )
 
     records: list[dict[str, Any]] = []
 
     for index, item in enumerate(payload):
         if not isinstance(item, dict):
-            raise DeliveryExportError(
-                f"Internal record at index {index} must be an object"
-            )
+            raise DeliveryExportError(f"Internal record at index {index} must be an object")
         records.append(item)
 
     return records
@@ -295,21 +278,14 @@ def main() -> int:
     records = load_internal_records(args.input.resolve())
 
     if args.expected_funds and len(records) != args.expected_funds:
-        raise DeliveryExportError(
-            f"Expected {args.expected_funds} funds, found {len(records)}"
-        )
+        raise DeliveryExportError(f"Expected {args.expected_funds} funds, found {len(records)}")
 
-    converted = [
-        convert_record(record, index)
-        for index, record in enumerate(records)
-    ]
+    converted = [convert_record(record, index) for index, record in enumerate(records)]
 
     names = [record["name"].casefold() for record in converted]
 
     if len(names) != len(set(names)):
-        raise DeliveryExportError(
-            "Delivery output contains duplicate fund names"
-        )
+        raise DeliveryExportError("Delivery output contains duplicate fund names")
 
     write_json_atomic(args.output.resolve(), converted)
 

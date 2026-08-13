@@ -25,17 +25,24 @@ from fundscraper.conflict_resolution import (
     resolve_group,
 )
 from fundscraper.database import ParsedDocumentRecord
+from fundscraper.document_dates import extract_document_dates
 from fundscraper.document_parser import ParsedDocument
 from fundscraper.extended_validation import fallback_extraction_metadata
 from fundscraper.field_definitions import (
+    FUND_CAPITAL_READING_LABELS,
     HOLDING_PERIOD_FROM_PATTERN,
     HOLDING_PERIOD_RANGE_PATTERN,
     HOLDING_PERIOD_TO_PATTERN,
     classify_annualization,
+    classify_capital_metric,
+    classify_horizon_kind,
     classify_return_type,
     is_negotiated_fee,
+    label_is_negated,
     months_from_period,
+    refers_to_period_end,
     share_class_code,
+    states_benchmark_linked_return,
     states_no_published_return,
 )
 from fundscraper.html_discovery import normalize_search_text
@@ -56,6 +63,7 @@ from fundscraper.output_models import (
     FeeType,
     FieldResult,
     FieldStatus,
+    HorizonKind,
     InvestmentHorizonValue,
     MinimumInvestmentKind,
     MinimumInvestmentValue,
@@ -867,9 +875,21 @@ def extract_investment_horizon(
         if "doporucen" in window.normalized:
             score += 15
 
+        # The words immediately around the number decide whether it is
+        # the horizon or the least of it. Read from the match rather than
+        # the whole window, because a page saying "min. 100 000 Kc"
+        # elsewhere must not turn a five-year horizon into a floor.
+        kind = classify_horizon_kind(
+            window.normalized[max(match.start() - 40, 0) : match.end() + 20]
+        )
+
         candidates.append(
             Candidate(
-                value=InvestmentHorizonValue(recommended_years=years),
+                value=InvestmentHorizonValue(
+                    recommended_years=years,
+                    kind=kind,
+                    minimum_years=(years if kind is HorizonKind.MINIMUM else None),
+                ),
                 raw_value=window.quote,
                 quote=window.quote,
                 page_number=window.page_number,
@@ -1057,6 +1077,14 @@ def _target_return_candidate(
     Storing them all as "target" told an investor that a fund aims at a
     number it in fact only pays before its founder is paid.
     """
+
+    # "prednostne do rustu PIA az do vyse jejich zhodnoceni 2TR + 1 %
+    # p.a." states a rate that moves with a reference rate. The stored
+    # model has nowhere to put the reference, and a delivered 1 % a year
+    # is not a weaker version of the truth but a different claim, so the
+    # window yields nothing rather than its spread.
+    if states_benchmark_linked_return(window.normalized):
+        return None
 
     return_type = classify_return_type(window.normalized)
 
@@ -1459,16 +1487,9 @@ def extract_aum(
 ) -> FieldResult[AssetsUnderManagementValue]:
     candidates: list[Candidate[AssetsUnderManagementValue]] = []
 
-    aum_keywords = (
-        "majetek fondu",
-        "hodnota majetku",
-        "cista aktiva",
-        "fondovy kapital",
-        "net assets",
-        "fund assets",
-        "net asset value",
-        "assets under management",
-    )
+    # The shared fund-level vocabulary, not a second private list. It
+    # carries the inflected forms a Czech report actually uses.
+    aum_keywords = FUND_CAPITAL_READING_LABELS
 
     manager_keywords = (
         "investicni spolecnost spravuje",
@@ -1490,6 +1511,9 @@ def extract_aum(
             continue
 
         as_of = extract_date(window.normalized)
+
+        if as_of is None:
+            as_of = _period_end_date(window)
 
         if as_of is None:
             continue
@@ -1552,12 +1576,16 @@ def extract_aum(
             amount=value.amount,
             currency=value.currency,
         ),
-        # The assets of one date and the assets of another are both true.
-        # Only two figures of the same metric on the same day in the same
-        # currency can contradict each other.
+        # This field is the assets of the fund *now*, so two readings of
+        # the same metric compete however far apart their dates are, and
+        # the ranking ladder prefers the newer one. Keeping the date in
+        # the key made every date its own uncontested winner, which is
+        # how a 2023 net asset value was delivered as the current assets
+        # of a fund whose own history already held a 2025 one. Every
+        # dated observation still survives in ``aum_history``, which
+        # groups by date on purpose.
         conflict_key=lambda value: (
             value.metric_type.value,
-            value.as_of.isoformat(),
             value.currency,
         ),
         field="assets_under_management",
@@ -1854,17 +1882,54 @@ def _fee_frequency(
     return FeeFrequency.ANNUAL
 
 
+def _period_end_date(
+    window: TextWindow,
+) -> date | None:
+    """
+    Date a value that names its period instead of its day.
+
+    Only one substitution is allowed and only when the text asks for it:
+    the window has to say the figure is stated at the end of the
+    accounting period, and the document has to state when that period
+    ended. A publication date is never used — when a report is published
+    says nothing about when its figures were measured, and a value dated
+    by its own publication would be wrong by up to a year.
+    """
+
+    if not refers_to_period_end(window.normalized):
+        return None
+
+    dates = extract_document_dates(
+        text=window.document.document.full_text,
+        url=window.document.record.url or "",
+    )
+
+    period_end = dates.reporting_period_end
+
+    if period_end is None:
+        return None
+
+    return period_end.value
+
+
 def _detect_aum_metric(
     normalized: str,
 ) -> AumMetricType:
-    if "net asset value" in normalized or " nav " in f" {normalized} ":
-        return AumMetricType.NAV
+    """
+    Name the capital figure a window states, using the shared labels.
 
-    if "cista aktiva" in normalized or "net assets" in normalized:
-        return AumMetricType.NET_ASSETS
+    This used to carry its own short ladder, which disagreed with
+    ``classify_capital_metric`` on the one label they both knew: it read
+    "fondovy kapital" as equity where the shared table reads it as fund
+    capital. One delivered output therefore reported 52 012 tis. Kc as
+    the equity of a fund whose own history recorded the same figure, on
+    the same day, as its fund capital.
+    """
 
-    if "fondovy kapital" in normalized:
-        return AumMetricType.EQUITY
+    metric = classify_capital_metric(normalized)
+
+    if metric is not None:
+        return metric
 
     if "aktiva" in normalized or "fund assets" in normalized:
         return AumMetricType.ASSETS_TOTAL
@@ -1948,6 +2013,18 @@ def _money_after_label(
 
         while start >= 0:
             label_end = start + len(label)
+
+            # "z toho neinvesticni fondovy kapital: 100 000 Kc" names a
+            # component of the capital, not the capital. Skipping the
+            # occurrence lets the same window's "investicni fondovy
+            # kapital" supply the real figure.
+            if label_is_negated(
+                normalized=normalized,
+                label_start=start,
+            ):
+                start = normalized.find(label, start + 1)
+
+                continue
 
             money_match = MONEY_PATTERN.search(
                 normalized,

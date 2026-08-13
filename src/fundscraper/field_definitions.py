@@ -27,6 +27,7 @@ from fundscraper.output_models import (
     AumMetricType,
     FeeTierBasis,
     HistoricalValueType,
+    HorizonKind,
     PartyRole,
     ReturnSeriesType,
     ReturnType,
@@ -271,6 +272,10 @@ COMPANY_SENTENCE_MARKERS: Final[tuple[str, ...]] = (
     "byla",
     "bude",
     "muze",
+    "provadi",
+    "zajistuje",
+    "obhospodaruje",
+    "administraci",
 )
 
 
@@ -311,6 +316,169 @@ PARTY_LABEL_MAXIMUM_DISTANCE: Final = 120
 # Which capital figure a label names. The order matters: a statement of a
 # fund contains "zapisovany zakladni kapital" and "fondovy kapital" in the
 # same paragraph, and only the most specific label may win.
+# Wording that turns a stated number of years into a bound rather than a
+# figure. "min. 3 roky" and "5 let a vice" both name a floor, and one
+# delivered output reported the first as an exact horizon of three years,
+# which tells an investor to plan for exactly what the fund calls the
+# least it will accept.
+HORIZON_MINIMUM_MARKERS: Final[tuple[str, ...]] = (
+    "min.",
+    "min ",
+    "minimalne",
+    "minimalni",
+    "nejmene",
+    "alespon",
+    "a vice",
+    "a delsi",
+    "a dele",
+    "or more",
+    "at least",
+    "minimum",
+)
+
+
+HORIZON_MAXIMUM_MARKERS: Final[tuple[str, ...]] = (
+    "maximalne",
+    "maximalni",
+    "nejvyse",
+    "at most",
+    "maximum",
+)
+
+
+# A horizon written as a span. "bude se pohybovat v rozmezi 3 - 5 let"
+# names both ends, and one delivered output kept only the upper one as
+# an exact horizon.
+HORIZON_RANGE_PATTERN: Final = re.compile(
+    r"""
+    (?P<minimum>\d{1,2}(?:[,.]\d+)?)
+    \s*
+    (?:-|az|do|to)
+    \s*
+    (?P<maximum>\d{1,2}(?:[,.]\d+)?)
+    \s*
+    (?:let|rok|roky|roku|years?)
+    """,
+    re.VERBOSE,
+)
+
+
+def states_a_horizon_range(
+    normalized: str,
+) -> bool:
+    """Return whether a horizon is written as a span of years."""
+
+    match = HORIZON_RANGE_PATTERN.search(normalized)
+
+    if match is None:
+        return False
+
+    return match.group("minimum") != match.group("maximum")
+
+
+def classify_horizon_kind(
+    normalized: str,
+) -> HorizonKind:
+    """
+    Return whether a stated horizon is a floor or the figure itself.
+
+    ``HorizonKind`` has no ceiling, and adding one would change a string
+    every consumer of the delivered file already reads. A horizon stated
+    as a maximum is therefore left as it is here and reported by
+    ``validate_investment_horizon`` instead, so the case is visible
+    without the schema moving under anyone.
+    """
+
+    if any(marker in normalized for marker in HORIZON_MINIMUM_MARKERS):
+        return HorizonKind.MINIMUM
+
+    return HorizonKind.EXACT
+
+
+# A return stated as a reference rate plus a spread. The spread on its
+# own is not the return: "2TR + 1 % p.a." was delivered as a target of
+# 1 % a year, which is neither what the fund promises nor a number an
+# investor could act on. The reference rate has to be named for the
+# figure to mean anything, so a window carrying one of these markers is
+# not a fixed rate.
+BENCHMARK_RETURN_MARKERS: Final[tuple[str, ...]] = (
+    "2tr",
+    "2t repo",
+    "repo sazb",
+    "repo rate",
+    "pribor",
+    "euribor",
+    "wibor",
+    "sofr",
+    "sazby cnb",
+    "sazbou cnb",
+    "sazba cnb",
+    "inflac",
+    "inflation",
+    "benchmark",
+)
+
+
+def states_benchmark_linked_return(
+    normalized: str,
+) -> bool:
+    """Return whether a stated rate is a spread over a reference rate."""
+
+    return any(marker in normalized for marker in BENCHMARK_RETURN_MARKERS)
+
+
+# Wording that turns a capital label into one component of it. A Czech
+# statute summary lists "z toho neinvesticni fondovy kapital: 100 000 Kc"
+# beside "z toho investicni fondovy kapital: ...", and the first is the
+# registered shell of the fund rather than what it holds. Five delivered
+# funds carried that component as their assets: 100 000 CZK for VALOUR,
+# 29 950 for VENDEAVOUR, 30 000 for SALUTEM, 34 000 for Safety Real and
+# 66 720 000 for WF Group, against real capital of hundreds of millions.
+#
+# "neinvesticni fondovy kapital" also *contains* the label
+# "investicni fondovy kapital", so a plain substring search reads the
+# negated component as the fund's own capital.
+CAPITAL_COMPONENT_QUALIFIERS: Final[tuple[str, ...]] = (
+    "neinvesticni",
+    "neinvesticniho",
+)
+
+
+# Wording that names a date without writing one. A statute summary says
+# the capital is stated "k poslednimu dni ucetniho obdobi" and never
+# repeats the day, so the figure is correct, dated, and invisible to a
+# date pattern. The document's own reporting period supplies the day.
+PERIOD_END_REFERENCE_MARKERS: Final[tuple[str, ...]] = (
+    "k poslednimu dni ucetniho obdobi",
+    "k poslednimu dni obdobi",
+    "ke konci ucetniho obdobi",
+    "k rozvahovemu dni",
+    "k datu ucetni zaverky",
+    "at the end of the accounting period",
+    "as at the balance sheet date",
+)
+
+
+def refers_to_period_end(
+    normalized: str,
+) -> bool:
+    """Return whether a value is dated by naming the reporting period."""
+
+    return any(marker in normalized for marker in PERIOD_END_REFERENCE_MARKERS)
+
+
+def label_is_negated(
+    *,
+    normalized: str,
+    label_start: int,
+) -> bool:
+    """Return whether a capital label is qualified away just before it."""
+
+    lead = normalized[max(0, label_start - 40) : label_start]
+
+    return any(lead.rstrip().endswith(word) for word in CAPITAL_COMPONENT_QUALIFIERS)
+
+
 CAPITAL_METRIC_LABELS: Final[
     tuple[
         tuple[
@@ -417,6 +585,40 @@ CAPITAL_METRIC_LABELS: Final[
 )
 
 
+CAPITAL_METRIC_LABELS_BY_METRIC: Final[dict[AumMetricType, tuple[str, ...]]] = {
+    metric: labels for metric, labels in CAPITAL_METRIC_LABELS
+}
+
+
+# The labels the assets extractor may read a fund's own capital from.
+#
+# Derived from the shared table, but only from the metrics that name the
+# fund's capital itself. Widening it to every fund-level metric was
+# tried and reverted: it added "vlastni kapital" and "aktiva celkem",
+# which stand in *any* company's balance sheet, and one manager's annual
+# report then supplied its own equity of 9 912 654 Kc as the assets of a
+# fund it administers. The narrowness of this list is load-bearing.
+#
+# Inflected forms matter: "vyse fondoveho kapitalu" is how a Czech
+# statute summary states the headline figure, and the extractor's older
+# private list knew only the nominative "fondovy kapital".
+FUND_CAPITAL_READING_LABELS: Final[tuple[str, ...]] = tuple(
+    sorted(
+        {
+            *CAPITAL_METRIC_LABELS_BY_METRIC[AumMetricType.FUND_CAPITAL],
+            *CAPITAL_METRIC_LABELS_BY_METRIC[AumMetricType.NAV],
+            *CAPITAL_METRIC_LABELS_BY_METRIC[AumMetricType.NET_ASSETS],
+            *CAPITAL_METRIC_LABELS_BY_METRIC[AumMetricType.ASSETS_UNDER_MANAGEMENT],
+            "majetek fondu",
+            "hodnota majetku fondu",
+            "fund assets",
+        },
+        key=len,
+        reverse=True,
+    )
+)
+
+
 # Every capital label, longest first. Used when the metric of a value has
 # to be read from the words standing directly in front of it.
 CAPITAL_METRIC_BY_LABEL: Final[
@@ -509,6 +711,27 @@ NON_FUND_CAPITAL_METRICS: Final[frozenset[AumMetricType]] = frozenset(
         AumMetricType.STATUTORY_MINIMUM_CAPITAL,
         AumMetricType.MANAGER_AUM,
     }
+)
+
+
+# Every label naming a fund-level capital figure, taken from the shared
+# table above so the assets extractor and the metric classifier cannot
+# drift apart. They already had: the extractor's private list knew
+# "fondovy kapital" but not the genitive "fondoveho kapitalu", so
+# "vyse fondoveho kapitalu: 672 417 510 Kc" — the headline figure of
+# every AVANT statute summary — was invisible to it while the classifier
+# read it correctly.
+FUND_LEVEL_CAPITAL_LABELS: Final[tuple[str, ...]] = tuple(
+    sorted(
+        {
+            label
+            for metric, labels in CAPITAL_METRIC_LABELS
+            if metric not in NON_FUND_CAPITAL_METRICS
+            for label in labels
+        },
+        key=len,
+        reverse=True,
+    )
 )
 
 
@@ -874,6 +1097,20 @@ PER_ANNUM_MARKERS: Final[tuple[str, ...]] = (
     "per annum",
     "annually",
     "yearly",
+    # A source states the period in the name of the figure as often as
+    # it does in a suffix: "Target annual return 30%" and "rocni vynos
+    # 6 %" are per annum and were classified as unknown. Only the
+    # phrases are matched, never the bare word, so the heading of an
+    # annual report never turns a return into a rate per annum.
+    "annual return",
+    "annual target",
+    "annual yield",
+    "annualis",
+    "annualiz",
+    "rocni vynos",
+    "rocniho vynosu",
+    "rocni zhodnoceni",
+    "rocniho zhodnoceni",
 )
 
 
@@ -1200,6 +1437,8 @@ def clean_party_name(
 
     name = " ".join(raw_name.split()).strip(" 	-–—•:,;")
 
+    name = _without_leading_date(name)
+
     # A legal name opens with a capital letter or a digit, and it is not
     # introduced by a connective. Both kinds of leading word are dropped
     # in one loop: stripping them separately left "Spolecnosti je CODYA
@@ -1243,6 +1482,54 @@ def clean_party_name(
         return None
 
     return name
+
+
+# A date standing in front of a company name, in the two spellings the
+# delivered output holds. A statute writes "s ucinnosti od 4. 10. 2021
+# AVANT investicni spolecnost, a.s." and a web footer writes "(c) 2025
+# investicni spolecnost", and both dates were kept as part of the name
+# because a leading digit was taken to open one.
+_LEADING_DATE: Final = re.compile(
+    r"""
+    ^
+    (?:
+        \d{1,2}\s*[./]\s*\d{1,2}\s*[./]\s*(?:19|20)\d{2}
+        |
+        (?:19|20)\d{2}
+    )
+    \s*[.,]?\s+
+    """,
+    re.VERBOSE,
+)
+
+
+def _without_leading_date(
+    name: str,
+) -> str:
+    """
+    Drop a date in front of a company name, when it is safely separable.
+
+    Only a complete date or a bare year is removed, and only when a word
+    that can open a company name follows it. "4. 10. 2021 AVANT
+    investicni spolecnost, a.s." loses its date; "4stavebni a.s." and
+    "3M FUND MSI SICAV a.s." keep every digit they have, because neither
+    opens with a date.
+    """
+
+    match = _LEADING_DATE.match(name)
+
+    if match is None:
+        return name
+
+    rest = name[match.end() :].strip(" 	-–—•:,;")
+
+    if len(rest) < 3:
+        return name
+
+    if not (rest[:1].isupper() or rest[:1].islower()):
+        return name
+
+    return rest
 
 
 def is_generic_company_name(

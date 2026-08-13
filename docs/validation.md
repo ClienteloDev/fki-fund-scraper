@@ -47,6 +47,57 @@ and one group per field. The full list is the enum itself; every code in it is a
 Codes that were delivered before Step 4 kept their original strings, so an old report and a
 new one can be compared line by line.
 
+### Attribution rules
+
+Four codes exist because a value can be well-formed, correctly converted and still describe
+something other than the fund it was written under:
+
+- `capital_of_another_company` — the evidence attaches the amount to a company the fund
+  holds rather than to the fund. It only fires when the amount is findable in the quote, a
+  different company stands between the start of the quote and that amount, and neither the
+  fund's own name nor a plain word for the fund stands any closer. A hard reject.
+- `party_name_contains_a_date` — a manager or administrator stored with a leading date or
+  year, captured together with the statute line that names the company.
+- `unknown_annualization_for_annual_rate` — a target return delivered in a `_percent_pa`
+  property that no source ever called annual.
+- `zero_fee_of_another_fee_type` — a zero read from the row of a different fee in a cost
+  table.
+
+### Current assets against history
+
+`assets_under_management` is what the fund holds **now**; `aum_history` is every dated
+observation it published. They are read from the same documents and are easy to confuse, and
+one delivered output confused them — a 2023 net asset value stood as the current figure while
+the fund's own history already held a 2025 one.
+
+`_aum_superseded_by_history` (a cross-field rule) reports a current figure that one of the
+fund's own fund-level observations has outgrown. It compares dated evidence against dated
+evidence, so nothing depends on today's date or on how old a value is allowed to be: a figure
+is refused for being **superseded**, never for being old. A fund whose only figure is from
+2019 keeps it, and the five-year `stale_as_of_date` rule speaks for that case instead.
+
+Nothing is ever removed from `aum_history`. Reporting a superseded current figure says
+nothing about the observation it lost to, and both stay in the series.
+
+### Wording rules
+
+Four codes exist because the number was read correctly and the words around it were not:
+
+- `horizon_bound_lost` — the source states a floor ("min. 3 roky", "5 let a vice"), a span
+  ("v rozmezi 3 - 5 let") or a ceiling, and the value stores a single exact figure.
+- `capital_metric_contradicts_evidence` — the evidence names a different line of the
+  statement than the value claims. Fund capital, net assets, a net asset value and equity are
+  not interchangeable, and equal amounts do not merge them.
+- `benchmark_return_as_fixed_rate` — the source states a rate over a reference
+  (`2TR + 1 %`, `PRIBOR + X`, `inflace + X`) and the value stores the spread alone. A hard
+  reject: the spread is not a weaker version of the promise but a different one.
+- `newer_aum_observation_exists` — above.
+
+Magnitude never refuses a fee on its own. An extreme rate is delivered when the source line
+names that fee type and states the condition it applies under, and withheld when the number
+belongs to a clause about who receives the fee (`percentage_describes_income_share`) or does
+not appear in the evidence at all (`value_not_present_in_evidence`).
+
 ## Field specifications
 
 `FIELD_SPECIFICATIONS` states, per field, what a value is allowed to be: value kind, unit,
@@ -56,7 +107,15 @@ and `review_only` code lists. The audit publishes this table in its report under
 `field_specifications`, so a reader sees the rule a value was measured against.
 
 Example — `assets_under_management`: money, CZK/EUR/USD, between 1e6 and 5e11, as-of date
-required, hard rejects `manager_aum_as_fund_aum` and `statutory_capital_as_aum`.
+required, hard rejects `manager_aum_as_fund_aum`, `statutory_capital_as_aum` and
+`capital_of_another_company`.
+
+The same magnitude ladder is applied to the dated series, not only to the single figure: a
+fund-level observation below the per-share bound is `per_share_value_as_aum`, one below the
+fund bound is `implausibly_small_aum`, and one above the sector bound is
+`implausibly_large_aum`. `aum_history` and `historical_values` are narrowed the same way the
+single figure is, so an annual report published in thousands is named
+`thousands_unit_not_applied` rather than left as a bare magnitude complaint.
 
 ## Traceability
 
@@ -86,6 +145,19 @@ field as unevidenced would describe the schema rather than the data.
   (`historical_return_as_target_return`);
 - the manager and the administrator carrying the same name under different registration
   numbers. The same company acting in both roles is normal and is *not* reported.
+
+## Ruleset version
+
+`AUDIT_RULESET_VERSION` in `extended_validation.py` names the rules currently in force, and
+every generated report carries it beside `schema_version` and `input_sha256`. The two
+versions answer different questions: `schema_version` describes the shape of the report,
+`ruleset_version` describes the judgement in it.
+
+**Bump `AUDIT_RULESET_VERSION` whenever a rule is added, removed or changed in a way that
+alters what an audit reports.** A digest cannot notice this on its own — the audited file can
+stay byte-identical while what counts as a defect changes underneath it. One report of
+`funds.after-fast.json` withheld 138 fields and the next report of the very same bytes
+withheld 194, and delivery had no way to tell them apart.
 
 ## The audit
 

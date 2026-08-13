@@ -30,9 +30,11 @@ from fundscraper.database import (
 )
 from fundscraper.delivery_export import (
     DeliveryExportError,
+    audit_mismatch_reason,
     build_delivery_records,
     delivery_summary,
-    load_audit_findings,
+    input_digest,
+    load_audit,
     load_records,
     write_delivery_output,
 )
@@ -2861,12 +2863,23 @@ def export_delivery_command(
         typer.Option(
             "--audit",
             help=(
-                "Audit report. When given, any field the audit doubts is "
-                "delivered as not_found, which is the conservative export."
+                "Audit report. Any field the audit doubts is delivered as "
+                "not_found. Required unless --unsafe-without-audit is given."
             ),
             dir_okay=False,
         ),
     ] = None,
+    unsafe_without_audit: Annotated[
+        bool,
+        typer.Option(
+            "--unsafe-without-audit",
+            help=(
+                "Export on the extraction status alone. Suspicious, "
+                "conflicting and rejected values are then delivered as "
+                "found. For development only."
+            ),
+        ),
+    ] = False,
     include_source_url: Annotated[
         bool,
         typer.Option(
@@ -2886,6 +2899,22 @@ def export_delivery_command(
 
     resolved_output = output_path.resolve()
 
+    if audit_path is None and not unsafe_without_audit:
+        # A value can be found and still be wrong in a way only the audit
+        # knows about — an implausible per-share figure delivered as fund
+        # capital, a series dated in the future. Exporting without the
+        # audit hands those to a reader as clean data, so it has to be
+        # asked for explicitly.
+        typer.echo(
+            "An audit report is required for a safe delivery export. "
+            "Produce one with scripts/audit_enriched_output.py and pass "
+            "--audit, or pass --unsafe-without-audit to export on the "
+            "extraction status alone.",
+            err=True,
+        )
+
+        raise typer.Exit(code=1)
+
     if resolved_input == resolved_output:
         typer.echo(
             "The delivery output must not overwrite the internal output.",
@@ -2897,9 +2926,32 @@ def export_delivery_command(
     try:
         records = load_records(resolved_input)
 
-        findings = load_audit_findings(
+        audit = load_audit(
             audit_path.resolve() if audit_path is not None else None,
         )
+
+        if audit_path is not None:
+            # The audit is only worth applying to the file it was made
+            # from. Every run of this project produces the same fund
+            # identifiers, so an overlap of names proves nothing; the
+            # digest of the audited bytes does.
+            mismatch = audit_mismatch_reason(
+                audit=audit,
+                records=records,
+                input_sha256=input_digest(resolved_input),
+            )
+
+            if mismatch is not None:
+                typer.echo(
+                    f"The audit report does not describe this input: {mismatch}. "
+                    "Re-run scripts/audit_enriched_output.py against this exact "
+                    "file before exporting.",
+                    err=True,
+                )
+
+                raise typer.Exit(code=1)
+
+        findings = list(audit.findings)
 
         delivered = build_delivery_records(
             records=records,
@@ -2925,7 +2977,12 @@ def export_delivery_command(
     typer.echo(f"Delivery output: {resolved_output}")
     typer.echo(f"Funds: {len(delivered)}")
     typer.echo(
-        "Audit applied: " + (f"{audit_path} ({len(findings)} findings)" if audit_path else "no")
+        "Audit applied: "
+        + (
+            f"{audit_path} ({len(findings)} findings)"
+            if audit_path
+            else "NO - exported without an audit, values may be unsafe"
+        )
     )
     typer.echo("")
     typer.echo("Delivered values per field:")

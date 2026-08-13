@@ -230,20 +230,33 @@ Derive the clean file colleagues and the frontend consume. The internal output i
 ```powershell
 uv run fundscraper export-delivery `
     --input data/output/funds.full.json `
-    --output data/output/funds.delivery.json
+    --output data/output/funds.delivery.json `
+    --audit reports/output-audit.step4.json
 ```
 
-Conservative variant — every field the audit doubts is withheld:
+The audit is not optional, and it must be the audit of the exact file being exported. Without
+`--audit` the command writes nothing and exits 1. With one, the export hashes its input and
+compares the digest against the report's `input_sha256`; a report of any other file is
+refused, however many funds the two have in common. Run the audit against this output file
+first — an audit applied to the wrong file would withhold nothing and deliver every doubted
+value as clean.
+
+The digest alone cannot see a report made from *this* file by older rules, so the report also
+carries `ruleset_version` and the export requires it to equal `AUDIT_RULESET_VERSION`. A
+report written before that stamp existed is refused as legacy. Re-run the audit after
+changing validation, not only after changing the output — and bump the constant when you do,
+or the stale report will still be accepted.
+
+`--unsafe-without-audit` exports on the extraction status alone, for development only:
 
 ```powershell
 uv run fundscraper export-delivery `
     --input data/output/funds.full.json `
     --output data/output/funds.delivery.json `
-    --audit reports/output-audit.step4.json
+    --unsafe-without-audit
 ```
 
-Run the audit first so the report matches the current output. The command refuses to write
-over its own input, so it cannot damage `funds.full.json`.
+The command refuses to write over its own input, so it cannot damage `funds.full.json`.
 
 ## 12. Recovery and safety notes
 

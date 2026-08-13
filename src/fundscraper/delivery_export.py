@@ -18,10 +18,14 @@ reported as `not_found` with a null value, never as a guess.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
+
+from fundscraper.extended_validation import AUDIT_RULESET_VERSION
 
 # The fields the delivery carries, in the order they appear.
 DELIVERY_FIELDS: Final[tuple[str, ...]] = (
@@ -455,7 +459,15 @@ def build_delivery_records(
     audit_findings: Iterable[Mapping[str, Any]] = (),
     include_source_url: bool = True,
 ) -> list[dict[str, Any]]:
-    """Convert the internal output into the delivered one."""
+    """
+    Convert the internal output into the delivered one.
+
+    Passing no findings delivers on the extraction status alone, which is
+    not safe for anyone outside this project: a value can be found and
+    still be wrong in a way only the audit knows about. The callers that
+    matter require an audit; this function keeps the argument optional so
+    that a test can exercise one half of the rule at a time.
+    """
 
     withheld = blocked_fields(audit_findings)
 
@@ -504,13 +516,106 @@ def load_records(
     return [item for item in payload if isinstance(item, dict)]
 
 
-def load_audit_findings(
+@dataclass(frozen=True, slots=True)
+class DeliveryAudit:
+    """An audit report, with what identifies the file it was made from."""
+
+    findings: tuple[dict[str, Any], ...]
+    input_sha256: str | None
+    ruleset_version: str | None
+    fund_count: int | None
+
+
+def audit_mismatch_reason(
+    *,
+    audit: DeliveryAudit,
+    records: Sequence[Mapping[str, Any]],
+    input_sha256: str,
+) -> str | None:
+    """
+    Return why an audit does not describe this input, or None if it does.
+
+    An audit applied to the wrong file withholds nothing and delivers
+    every doubted value as clean, which is the exact failure the audit
+    exists to prevent. Sharing fund identifiers is no evidence of
+    belonging: every run of this project produces the same 341 of them,
+    so a report from last week overlaps a report from today completely
+    while describing different values.
+
+    What does prove it is the digest of the audited bytes together with
+    the version of the rules that read them. The digest alone is not
+    enough: a file can stay byte-identical while what counts as a defect
+    changes underneath it. The identifier and count checks that follow
+    are secondary; they catch a report edited or assembled by hand, where
+    neither stamp was recomputed.
+    """
+
+    if not audit.input_sha256:
+        return (
+            "the report carries no input_sha256, so there is no proof of "
+            "which file it was made from"
+        )
+
+    if audit.input_sha256 != input_sha256:
+        return (
+            f"the report was made from a file whose SHA-256 is "
+            f"{audit.input_sha256[:16]}..., and this input hashes to "
+            f"{input_sha256[:16]}..."
+        )
+
+    # The digest proves which bytes were audited, not which rules read
+    # them. An audit of this exact file made before a rule existed has
+    # the right digest and the wrong verdicts: the same input audited
+    # by the previous ruleset withheld 138 fields where the current one
+    # withholds 194, so trusting it would deliver 56 doubted values as
+    # clean.
+    if not audit.ruleset_version:
+        return (
+            "the report carries no ruleset_version, so it predates the "
+            "current validation rules and cannot be trusted to name what "
+            "they would refuse"
+        )
+
+    if audit.ruleset_version != AUDIT_RULESET_VERSION:
+        return (
+            f"the report was made by validation ruleset "
+            f"{audit.ruleset_version!r} and the current one is "
+            f"{AUDIT_RULESET_VERSION!r}"
+        )
+
+    known = {str(record.get("fund_id") or "") for record in records}
+
+    unknown = sorted(
+        {
+            str(finding.get("fund_id") or "")
+            for finding in audit.findings
+            if str(finding.get("fund_id") or "") not in known
+        }
+    )
+
+    if unknown:
+        return (
+            f"{len(unknown)} finding(s) name funds this input does not hold, such as {unknown[0]!r}"
+        )
+
+    if audit.fund_count is not None and audit.fund_count != len(records):
+        return f"the report audited {audit.fund_count} funds and this input holds {len(records)}"
+
+    return None
+
+
+def load_audit(
     path: Path | None,
-) -> list[dict[str, Any]]:
-    """Read the findings of an audit report, or nothing when absent."""
+) -> DeliveryAudit:
+    """Read an audit report, or an empty one when no path is given."""
 
     if path is None:
-        return []
+        return DeliveryAudit(
+            findings=(),
+            input_sha256=None,
+            ruleset_version=None,
+            fund_count=None,
+        )
 
     try:
         payload: object = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -524,7 +629,31 @@ def load_audit_findings(
     if not isinstance(findings, list):
         raise DeliveryExportError(f"Audit report contains no findings array: {path}")
 
-    return [item for item in findings if isinstance(item, dict)]
+    digest = payload.get("input_sha256") if isinstance(payload, dict) else None
+
+    ruleset = payload.get("ruleset_version") if isinstance(payload, dict) else None
+
+    summary = payload.get("summary") if isinstance(payload, dict) else None
+
+    funds = summary.get("funds") if isinstance(summary, dict) else None
+
+    return DeliveryAudit(
+        findings=tuple(item for item in findings if isinstance(item, dict)),
+        input_sha256=str(digest) if isinstance(digest, str) and digest else None,
+        ruleset_version=(str(ruleset) if isinstance(ruleset, str) and ruleset else None),
+        fund_count=funds if isinstance(funds, int) else None,
+    )
+
+
+def input_digest(
+    path: Path,
+) -> str:
+    """Return the SHA-256 of the file being exported."""
+
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise DeliveryExportError(f"Input file could not be read: {path}: {exc}") from exc
 
 
 def write_delivery_output(

@@ -152,9 +152,24 @@ The dated series keep their observations as structured rows so a chart can still
 currency, frequency, maximum flag, min/max band, negotiable flag, condition and their full
 `tiers`.
 
-With an audit report supplied, any field the audit calls `suspicious`, `conflicting`,
-`rejected` or `missing` is withheld as `not_found`. A field the audit says nothing about is
-valid and may be delivered.
+An audit report is required, and it must be the audit *of this file, by the current rules*.
+The export checks four things and fails closed on any of them:
+
+| Requirement | Refused when |
+| --- | --- |
+| `input_sha256` equals the SHA-256 of the input | the report describes other bytes |
+| `ruleset_version` equals `AUDIT_RULESET_VERSION` | the report predates or postdates the rules in force |
+| every finding's `fund_id` exists in the input | the report was edited or assembled by hand |
+| `summary.funds` equals the number of funds | the same |
+
+Sharing fund identifiers proves nothing — every run audits the same funds — so overlap is
+never accepted as evidence. A report written before the version stamp existed carries no
+`ruleset_version` and is refused as legacy.
+
+Any field the audit calls `suspicious`, `conflicting`, `rejected` or `missing` is withheld as
+`not_found`; a field it says nothing about is valid and may be delivered. The withholding is at whole-field level — a series with one doubted observation
+is withheld entirely rather than trimmed. `--unsafe-without-audit` skips the audit and is
+for development only.
 
 Three delivery-shaped schemas now exist; see the JSON Schema table above.
 `schemas/delivery-output.schema.json` describes an **older** five-field contract produced by

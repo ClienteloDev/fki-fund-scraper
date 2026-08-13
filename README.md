@@ -140,12 +140,19 @@ the `source_url`.
 ```powershell
 uv run fundscraper export-delivery `
     --input data/output/funds.full.json `
-    --output data/output/funds.delivery.json
+    --output data/output/funds.delivery.json `
+    --audit reports/output-audit.step4.json
 ```
 
-Pass `--audit reports/output-audit.step4.json` for the conservative export: any field the
-audit calls suspicious, conflicting or rejected is delivered as `not_found` with a null
-value. `--no-source-url` drops the document address as well. The command only reads the
+The audit is required, and it has to be the audit of the file being exported *by the rules in
+force*: the export refuses any report whose `input_sha256` differs from the hash of its input
+or whose `ruleset_version` differs from `AUDIT_RULESET_VERSION`. Any field the audit
+calls suspicious, conflicting, rejected or missing is delivered as `not_found` with a null
+value, so a doubted number never leaves as clean data.
+
+`--unsafe-without-audit` exports on the extraction status alone. It exists for development
+and says so on the console; the delivery it writes may carry values the audit would have
+withheld. `--no-source-url` drops the document address as well. The command only reads the
 internal file and refuses to write over it.
 
 Only `found` and `not_found` appear in the delivery format; `ambiguous`, `conflicting`,

@@ -13,18 +13,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from typer.testing import CliRunner
 
 from fundscraper.cli import app
 from fundscraper.delivery_export import (
     DELIVERY_FIELDS,
+    audit_mismatch_reason,
     build_delivery_records,
     delivery_summary,
-    load_audit_findings,
+    input_digest,
+    load_audit,
     load_records,
 )
+from fundscraper.extended_validation import AUDIT_RULESET_VERSION, AUDIT_SCHEMA_VERSION
 
 FUND_ID = "fund_0000000000000001"
 
@@ -735,6 +738,7 @@ def test_the_command_writes_the_delivery_file(
             str(internal),
             "--output",
             str(output),
+            "--unsafe-without-audit",
         ],
     )
 
@@ -791,12 +795,14 @@ def test_the_command_applies_an_audit_report(
     audit.write_text(
         json.dumps(
             {
+                "input_sha256": input_digest(internal),
+                "ruleset_version": AUDIT_RULESET_VERSION,
                 "findings": [
                     audit_finding(
                         field="target_return",
                         status="suspicious",
                     )
-                ]
+                ],
             }
         ),
         encoding="utf-8",
@@ -843,4 +849,689 @@ def test_loading_helpers_reject_what_they_cannot_read(
     else:
         raise AssertionError("invalid JSON should be refused")
 
-    assert load_audit_findings(None) == []
+    assert load_audit(None).findings == ()
+
+
+# ---------------------------------------------------------------------------
+# Failing closed
+# ---------------------------------------------------------------------------
+
+
+def test_a_suspicious_field_never_reaches_the_delivery_as_found(
+    tmp_path: Path,
+) -> None:
+    """
+    The real leak: 3M FUND delivered a suspicious series as clean data.
+
+    Its historical values held a fund capital of 0.5 CZK — a per-share
+    figure — and observations dated 2026-12-31 and 2027-12-31. The audit
+    said suspicious; the delivery said found, because it had been
+    produced without the audit.
+    """
+
+    internal = tmp_path / "funds.full.json"
+
+    internal.write_text(
+        json.dumps([internal_record()], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    audit = tmp_path / "audit.json"
+
+    audit.write_text(
+        json.dumps(
+            {
+                "input_sha256": input_digest(internal),
+                "ruleset_version": AUDIT_RULESET_VERSION,
+                "findings": [
+                    audit_finding(
+                        field="historical_values",
+                        status="suspicious",
+                    ),
+                    audit_finding(
+                        field="aum_history",
+                        status="suspicious",
+                    ),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "funds.delivery.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "export-delivery",
+            "--input",
+            str(internal),
+            "--output",
+            str(output),
+            "--audit",
+            str(audit),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+
+    delivered = json.loads(output.read_text(encoding="utf-8"))[0]
+
+    for field in ("historical_values", "aum_history"):
+        assert delivered[field] == {
+            "status": "not_found",
+            "value": None,
+        }, field
+
+    # The value itself is gone, not merely relabelled.
+    assert "1.0739" not in json.dumps(delivered)
+
+
+def test_the_export_refuses_to_run_without_an_audit(
+    tmp_path: Path,
+) -> None:
+    """Safety is the default; the unsafe mode has to be asked for."""
+
+    internal = tmp_path / "funds.full.json"
+
+    internal.write_text(
+        json.dumps([internal_record()], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "funds.delivery.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "export-delivery",
+            "--input",
+            str(internal),
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert not output.exists()
+
+    assert "audit report is required" in result.stderr.lower()
+
+
+def test_the_unsafe_mode_still_exists_for_development(
+    tmp_path: Path,
+) -> None:
+    internal = tmp_path / "funds.full.json"
+
+    internal.write_text(
+        json.dumps([internal_record()], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "funds.delivery.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "export-delivery",
+            "--input",
+            str(internal),
+            "--output",
+            str(output),
+            "--unsafe-without-audit",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+
+    assert (
+        json.loads(output.read_text(encoding="utf-8"))[0]["historical_values"]["status"] == "found"
+    )
+
+    # The console says plainly that nothing was checked.
+    assert "without an audit" in result.stdout
+
+
+def test_an_audit_of_another_output_is_refused(
+    tmp_path: Path,
+) -> None:
+    """
+    An audit whose funds are unknown here would withhold nothing.
+
+    Applying it silently would deliver every doubted value as clean,
+    which is the failure this whole change exists to prevent.
+    """
+
+    internal = tmp_path / "funds.full.json"
+
+    internal.write_text(
+        json.dumps([internal_record()], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    stale = audit_finding(
+        field="historical_values",
+        status="suspicious",
+    )
+
+    stale["fund_id"] = "fund_ffffffffffffffff"
+
+    audit = tmp_path / "audit.json"
+
+    audit.write_text(
+        json.dumps({"findings": [stale]}),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "funds.delivery.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "export-delivery",
+            "--input",
+            str(internal),
+            "--output",
+            str(output),
+            "--audit",
+            str(audit),
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert not output.exists()
+
+
+# ---------------------------------------------------------------------------
+# Which input an audit belongs to
+# ---------------------------------------------------------------------------
+#
+# The first version of this check accepted an audit when any one of its
+# findings named a fund of the input. Every run of this project audits
+# the same funds, so that condition holds for every report this project
+# has ever produced, including one made from an older extraction whose
+# values have since changed. An audit accepted on that evidence withholds
+# the wrong fields and delivers the doubted ones as clean.
+
+
+UNSET: Final = "<unset>"
+
+
+def write_pair(
+    tmp_path: Path,
+    *,
+    findings: list[dict[str, Any]],
+    digest: str | None = None,
+    ruleset: str | None = UNSET,
+    fund_count: int | None = None,
+    records: list[dict[str, Any]] | None = None,
+) -> tuple[Path, Path]:
+    """Write an internal output and an audit report of it."""
+
+    internal = tmp_path / "funds.full.json"
+
+    internal.write_text(
+        json.dumps(records or [internal_record()], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    report: dict[str, Any] = {
+        "input_sha256": digest if digest is not None else input_digest(internal),
+        "findings": findings,
+    }
+
+    if ruleset != UNSET:
+        if ruleset is not None:
+            report["ruleset_version"] = ruleset
+    else:
+        report["ruleset_version"] = AUDIT_RULESET_VERSION
+
+    if fund_count is not None:
+        report["summary"] = {"funds": fund_count}
+
+    audit = tmp_path / "audit.json"
+
+    audit.write_text(
+        json.dumps(report, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    return internal, audit
+
+
+def mismatch(
+    internal: Path,
+    audit: Path,
+) -> str | None:
+    return audit_mismatch_reason(
+        audit=load_audit(audit),
+        records=load_records(internal),
+        input_sha256=input_digest(internal),
+    )
+
+
+def test_an_audit_of_this_exact_file_is_accepted(
+    tmp_path: Path,
+) -> None:
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="fees", status="suspicious")],
+    )
+
+    assert mismatch(internal, audit) is None
+
+
+def test_a_clean_audit_of_this_exact_file_is_accepted(
+    tmp_path: Path,
+) -> None:
+    """Zero findings is a clean result, not an absent one."""
+
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[],
+    )
+
+    assert mismatch(internal, audit) is None
+    assert load_audit(audit).findings == ()
+
+
+def test_a_stale_audit_of_the_same_funds_is_refused(
+    tmp_path: Path,
+) -> None:
+    """
+    The case the fund-identifier check could never catch.
+
+    Every finding names a fund of this input, and the fund count agrees.
+    Only the digest shows that the values audited are not the values
+    being exported.
+    """
+
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[
+            audit_finding(field="fees", status="suspicious"),
+            audit_finding(field="manager", status="suspicious"),
+        ],
+        digest="0" * 64,
+        fund_count=1,
+    )
+
+    reason = mismatch(internal, audit)
+
+    assert reason is not None
+    assert "sha-256" in reason.lower()
+
+
+def test_an_audit_matching_on_one_fund_only_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A partial or foreign report overlapping in one fund is still foreign."""
+
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="fees", status="suspicious")],
+        digest="a" * 64,
+    )
+
+    assert mismatch(internal, audit) is not None
+
+
+def test_an_audit_naming_a_fund_this_input_does_not_hold_is_refused(
+    tmp_path: Path,
+) -> None:
+    """
+    The digest agrees but a finding does not, which only hand editing does.
+
+    The digest is checked first, so reaching this rule means the report
+    was assembled or edited after it was written.
+    """
+
+    internal = tmp_path / "funds.full.json"
+
+    internal.write_text(
+        json.dumps([internal_record()], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    foreign = audit_finding(field="fees", status="suspicious")
+
+    foreign["fund_id"] = "fund_ffffffffffffffff"
+
+    audit = tmp_path / "audit.json"
+
+    audit.write_text(
+        json.dumps(
+            {
+                "input_sha256": input_digest(internal),
+                "ruleset_version": AUDIT_RULESET_VERSION,
+                "findings": [foreign],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    reason = mismatch(internal, audit)
+
+    assert reason is not None
+    assert "fund_ffffffffffffffff" in reason
+
+
+def test_an_audit_of_a_different_number_of_funds_is_refused(
+    tmp_path: Path,
+) -> None:
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="fees", status="suspicious")],
+        fund_count=341,
+    )
+
+    reason = mismatch(internal, audit)
+
+    assert reason is not None
+    assert "341" in reason
+
+
+def test_an_audit_without_a_digest_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A report that never recorded what it read proves nothing."""
+
+    internal = tmp_path / "funds.full.json"
+
+    internal.write_text(
+        json.dumps([internal_record()], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    audit = tmp_path / "audit.json"
+
+    audit.write_text(
+        json.dumps(
+            {
+                "ruleset_version": AUDIT_RULESET_VERSION,
+                "findings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    reason = mismatch(internal, audit)
+
+    assert reason is not None
+    assert "input_sha256" in reason
+
+
+def test_the_command_refuses_a_stale_audit_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="historical_values", status="suspicious")],
+        digest="0" * 64,
+    )
+
+    output = tmp_path / "funds.delivery.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "export-delivery",
+            "--input",
+            str(internal),
+            "--output",
+            str(output),
+            "--audit",
+            str(audit),
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert not output.exists()
+
+    assert "does not describe this input" in result.stderr
+
+
+def test_the_command_accepts_the_audit_of_its_own_input(
+    tmp_path: Path,
+) -> None:
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="historical_values", status="suspicious")],
+    )
+
+    output = tmp_path / "funds.delivery.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "export-delivery",
+            "--input",
+            str(internal),
+            "--output",
+            str(output),
+            "--audit",
+            str(audit),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+
+    delivered = json.loads(output.read_text(encoding="utf-8"))[0]
+
+    assert delivered["historical_values"] == {
+        "status": "not_found",
+        "value": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Which rules an audit was made by
+# ---------------------------------------------------------------------------
+#
+# The digest proves which bytes were audited and nothing about which
+# rules read them. `funds.after-fast.json` never changed while the
+# validation rules did, and the older report of that same file carries
+# the right digest with weaker verdicts: it withheld 138 fields where the
+# current rules withhold 194. Delivering from it would hand over 56
+# doubted values as clean.
+
+
+def test_a_current_audit_of_this_file_is_accepted(
+    tmp_path: Path,
+) -> None:
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="fees", status="suspicious")],
+        ruleset=AUDIT_RULESET_VERSION,
+    )
+
+    assert mismatch(internal, audit) is None
+
+
+def test_a_current_audit_with_no_findings_is_accepted(
+    tmp_path: Path,
+) -> None:
+    """A clean result of the current rules is a result, not an absence."""
+
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[],
+        ruleset=AUDIT_RULESET_VERSION,
+    )
+
+    assert mismatch(internal, audit) is None
+
+
+def test_an_audit_made_by_older_rules_is_refused(
+    tmp_path: Path,
+) -> None:
+    """
+    The gap the digest could not close.
+
+    Same file, same funds, same count, correct digest — and verdicts from
+    a ruleset that had never heard of half the rules.
+    """
+
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="fees", status="suspicious")],
+        ruleset="2026-08-10.1",
+    )
+
+    reason = mismatch(internal, audit)
+
+    assert reason is not None
+    assert "2026-08-10.1" in reason
+    assert AUDIT_RULESET_VERSION in reason
+
+
+def test_a_legacy_audit_without_a_ruleset_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Every report written before this stamp existed is a legacy report."""
+
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="fees", status="suspicious")],
+        ruleset=None,
+    )
+
+    reason = mismatch(internal, audit)
+
+    assert reason is not None
+    assert "ruleset_version" in reason
+
+
+def test_a_current_ruleset_does_not_excuse_a_stale_digest(
+    tmp_path: Path,
+) -> None:
+    """The two stamps are required together, not either one."""
+
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="fees", status="suspicious")],
+        digest="0" * 64,
+        ruleset=AUDIT_RULESET_VERSION,
+    )
+
+    reason = mismatch(internal, audit)
+
+    assert reason is not None
+    assert "sha-256" in reason.lower()
+
+
+def test_the_command_refuses_an_audit_of_older_rules_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="historical_values", status="suspicious")],
+        ruleset="2026-08-10.1",
+    )
+
+    output = tmp_path / "funds.delivery.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "export-delivery",
+            "--input",
+            str(internal),
+            "--output",
+            str(output),
+            "--audit",
+            str(audit),
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert not output.exists()
+
+    assert "ruleset" in result.stderr
+
+
+def test_the_command_refuses_a_legacy_audit_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    internal, audit = write_pair(
+        tmp_path,
+        findings=[audit_finding(field="historical_values", status="suspicious")],
+        ruleset=None,
+    )
+
+    output = tmp_path / "funds.delivery.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "export-delivery",
+            "--input",
+            str(internal),
+            "--output",
+            str(output),
+            "--audit",
+            str(audit),
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert not output.exists()
+
+
+def test_a_report_the_audit_writes_is_one_the_delivery_accepts(
+    tmp_path: Path,
+) -> None:
+    """
+    The two ends of the contract, met in the middle.
+
+    An export can only require a stamp the audit actually writes. This
+    runs the real audit over a real record, writes the real report and
+    hands it to the real check, so a stamp added on one side and not the
+    other fails here rather than in a delivery.
+    """
+
+    from fundscraper.output_audit import audit_enriched_output
+    from fundscraper.output_service import stable_fund_identifier
+
+    # The audit derives the identifier from the name and website rather
+    # than trusting the stored one, so a record written by hand has to
+    # carry the identifier the pipeline would have given it.
+    record = internal_record()
+
+    record["fund_id"] = stable_fund_identifier(
+        name=record["name"],
+        web=record["web"],
+    )
+
+    internal = tmp_path / "funds.full.json"
+
+    internal.write_text(
+        json.dumps([record], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    report = audit_enriched_output(
+        records=[record],
+        input_path=internal,
+        input_sha256=input_digest(internal),
+    )
+
+    written = report.model_dump(mode="json")
+
+    assert written["ruleset_version"] == AUDIT_RULESET_VERSION
+    assert written["schema_version"] == AUDIT_SCHEMA_VERSION
+    assert written["input_sha256"] == input_digest(internal)
+
+    audit = tmp_path / "audit.json"
+
+    audit.write_text(
+        json.dumps(written, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    assert mismatch(internal, audit) is None
