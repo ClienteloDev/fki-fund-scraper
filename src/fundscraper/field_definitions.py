@@ -1437,13 +1437,23 @@ def clean_party_name(
 
     name = " ".join(raw_name.split()).strip(" 	-–—•:,;")
 
-    name = _without_leading_date(name)
-
     # A legal name opens with a capital letter or a digit, and it is not
     # introduced by a connective. Both kinds of leading word are dropped
     # in one loop: stripping them separately left "Spolecnosti je CODYA
     # investicni spolecnost" once the tail of a declined label was gone.
+    #
+    # The date is stripped inside the same loop rather than once before
+    # it, because a connective can stand in front of the date: "je
+    # pocinaje 10. 05. 2018 AVANT investicni spolecnost, a.s." only
+    # exposes its date after "pocinaje" is gone.
     while name:
+        without_date = _without_leading_date(name)
+
+        if without_date != name:
+            name = without_date
+
+            continue
+
         head, separator, rest = name.partition(" ")
 
         folded_head = fold_diacritics(head).strip(".,;:")
@@ -1495,11 +1505,18 @@ _LEADING_DATE: Final = re.compile(
     (?:
         \d{1,2}\s*[./]\s*\d{1,2}\s*[./]\s*(?:19|20)\d{2}
         |
+        # the same date written with the month as a word, as a statute
+        # dates its own effect: "29. ledna 2021 AVANT investicni ..."
+        \d{1,2}\s*\.\s*
+        (?:ledna|unora|února|brezna|března|dubna|kvetna|května|cervna|června
+          |cervence|července|srpna|zari|září|rijna|října|listopadu|prosince)
+        \s*(?:19|20)\d{2}
+        |
         (?:19|20)\d{2}
     )
     \s*[.,]?\s+
     """,
-    re.VERBOSE,
+    re.VERBOSE | re.IGNORECASE,
 )
 
 

@@ -59,6 +59,45 @@ def test_strips_the_sentence_that_introduced_a_company() -> None:
     )
 
 
+def test_drops_a_date_that_a_connective_hid_in_front_of_the_company() -> None:
+    """The nine contaminated party values all read "je pocinaje <date> AVANT ...".
+
+    The date was stripped before the leading connective was, so once "pocinaje" was gone the
+    date stood at the front of the name and nothing removed it any more.
+    """
+
+    assert clean_party_name("počínaje 10. 05. 2018 AVANT investiční společnost, a.s.") == (
+        "AVANT investiční společnost, a.s."
+    )
+
+    assert clean_party_name("počínaje 21.12.2017 AVANT investiční společnost, a. s.") == (
+        "AVANT investiční společnost, a. s."
+    )
+
+    assert clean_party_name("s účinností od 4. 10. 2021 AVANT investiční společnost, a.s.") == (
+        "AVANT investiční společnost, a.s."
+    )
+
+    assert clean_party_name("počínaje 29. ledna 2021 AVANT investiční společnost, a.s.") == (
+        "AVANT investiční společnost, a.s."
+    )
+
+
+def test_keeps_the_digits_of_a_company_named_with_them() -> None:
+    """The neighbouring value that must keep passing: a name that opens with digits."""
+
+    assert clean_party_name("3M FUND MSI SICAV a.s.") == "3M FUND MSI SICAV a.s."
+
+    assert clean_party_name("4stavební a.s.") == "4stavební a.s."
+
+    assert clean_party_name("2N TELEKOMUNIKACE a.s.") == "2N TELEKOMUNIKACE a.s."
+
+    # a bare year in front of a name is a date; a year inside one is not
+    assert clean_party_name("2021 AVANT investiční společnost, a.s.") == (
+        "AVANT investiční společnost, a.s."
+    )
+
+
 def test_refuses_a_name_that_is_only_a_legal_form() -> None:
     assert clean_party_name("Investiční společnost") is None
 

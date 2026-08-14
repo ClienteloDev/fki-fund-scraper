@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Hashable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
@@ -2752,6 +2754,134 @@ def candidate_or_missing[ValueT](
     )
 
 
+@dataclass(frozen=True, slots=True)
+class IsinIdentity:
+    """Who an official ISIN belongs to, and at which scope."""
+
+    fund_name: str
+    scope: SourceScope
+    subfund_name: str | None = None
+    share_class_name: str | None = None
+
+
+# ISIN -> owner. Built from the official CNB register, so an entry is an
+# exact statement of ownership, not a guess.
+type IsinIdentityIndex = Mapping[str, IsinIdentity]
+
+
+# The index is supplied for a whole extraction run rather than threaded
+# through every field function, because identity is a property of the run
+# and not of one field. Unset, it is None, and every identity decision is
+# taken exactly as it was before the index existed.
+_ISIN_IDENTITY: Final[ContextVar[IsinIdentityIndex | None]] = ContextVar(
+    "fundscraper_isin_identity",
+    default=None,
+)
+
+
+@contextmanager
+def official_isin_identity(
+    index: IsinIdentityIndex | None,
+) -> Iterator[None]:
+    """
+    Make an official ISIN index available to identity decisions.
+
+    Entering with None - or with an empty index - changes nothing, so a
+    caller that has no register behaves exactly as before.
+    """
+
+    token = _ISIN_IDENTITY.set(index or None)
+
+    try:
+        yield
+    finally:
+        _ISIN_IDENTITY.reset(token)
+
+
+def active_isin_identity() -> IsinIdentityIndex | None:
+    """Return the index of the current extraction run, if one was set."""
+
+    return _ISIN_IDENTITY.get()
+
+
+# An ISIN as it is printed in a document: two country letters, nine
+# alphanumerics and a check digit.
+_ISIN_IN_TEXT: Final = re.compile(r"\b([A-Z]{2}[0-9A-Z]{9}[0-9])\b")
+
+# Only these scopes may be asserted by an ISIN. An ISIN identifies a
+# security, so it can prove the fund, the subfund or the share class it
+# was issued to - never a manager-level or generic document.
+_ISIN_ASSERTABLE: Final[frozenset[SourceScope]] = frozenset(
+    {
+        SourceScope.EXACT_FUND,
+        SourceScope.SUBFUND,
+        SourceScope.SHARE_CLASS,
+    }
+)
+
+
+def official_isin_scope(
+    *,
+    fund_name: str,
+    source_url: str,
+    source_title: str | None,
+    document_text: str,
+    isin_identity: IsinIdentityIndex | None,
+) -> SourceScope | None:
+    """
+    Resolve identity from an official ISIN printed in the source.
+
+    Returns the scope the ISIN was issued at when the document carries an
+    official ISIN of this fund, and None when the question cannot be
+    settled that way - no index, no ISIN, an unknown ISIN, or an ISIN
+    that belongs to a different fund. In every one of those cases the
+    caller falls back to name-based identity, unchanged.
+
+    This answers only "whose source is this". It says nothing about what
+    a value inside the source means: a per-share value does not become
+    fund assets, and a share-class fee does not become a fund-level fee,
+    merely because the owner is certain.
+    """
+
+    index = isin_identity if isin_identity is not None else _ISIN_IDENTITY.get()
+
+    if not index:
+        return None
+
+    haystack = " ".join(
+        part for part in (source_title or "", source_url, document_text) if part
+    ).upper()
+
+    if "CZ" not in haystack and "LU" not in haystack and "IE" not in haystack:
+        return None
+
+    mine: SourceScope | None = None
+
+    for token in set(_ISIN_IN_TEXT.findall(haystack)):
+        owner = index.get(token)
+
+        if owner is None:
+            continue
+
+        if owner.fund_name != fund_name:
+            # The document carries the ISIN of a different fund. That is
+            # evidence against this fund, so nothing is asserted here and
+            # the name-based rules decide.
+            return None
+
+        if owner.scope not in _ISIN_ASSERTABLE:
+            continue
+
+        # Several classes of one fund can appear in the same document.
+        # The narrowest scope wins, so a share-class KID stays a
+        # share-class source even when the fund's own ISIN is printed
+        # next to it.
+        if mine is None or _scope_rank(owner.scope) < _scope_rank(mine):
+            mine = owner.scope
+
+    return mine
+
+
 def _scope_verdict[ValueT](
     *,
     candidate: Candidate[ValueT],
@@ -2781,6 +2911,7 @@ def classify_source_scope(
     quote: str,
     value_offset: int | None = None,
     document: ExtractionDocument | None = None,
+    isin_identity: IsinIdentityIndex | None = None,
 ) -> SourceScope:
     """
     Determine whether a source really belongs to the requested fund.
@@ -2789,12 +2920,29 @@ def classify_source_scope(
     of the document, which is where the legal fund name appears. When a
     document names some fund but not this one, it belongs to another
     fund and must never be used.
+
+    An official ISIN, when one is supplied through `isin_identity`, is
+    stronger evidence than any of that: a subfund KID states the ISIN of
+    the class it prices but rarely repeats the parent fund's full legal
+    name, so requiring the name as well loses a source whose owner is
+    already certain.
     """
 
     normalized_quote = normalize_search_text(quote)
 
     if any(keyword in normalized_quote for keyword in SCOPE_MISMATCH_KEYWORDS):
         return SourceScope.MANAGER
+
+    official_scope = official_isin_scope(
+        fund_name=fund_name,
+        source_url=source_url,
+        source_title=source_title,
+        document_text=document_text,
+        isin_identity=isin_identity,
+    )
+
+    if official_scope is not None:
+        return official_scope
 
     fund_tokens = fund_identity_tokens(fund_name)
 
