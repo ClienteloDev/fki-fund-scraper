@@ -9,9 +9,13 @@ from __future__ import annotations
 
 from fundscraper.field_extraction import (
     SourceScope,
+    build_official_site_index,
     classify_source_scope,
     extract_fund_fields,
+    official_site_identity,
+    official_site_owns_page,
 )
+from fundscraper.models import FundInput
 from fundscraper.output_models import FieldStatus, ReasonCode, ScopeType
 from tests.test_field_extraction import create_extraction_document
 
@@ -61,6 +65,7 @@ def scope_of(
     title: str,
     text: str,
     quote: str = "",
+    value_offset: int | None = None,
 ) -> SourceScope:
     return classify_source_scope(
         fund_name=fund_name,
@@ -68,6 +73,7 @@ def scope_of(
         source_title=title,
         document_text=text,
         quote=quote or text,
+        value_offset=value_offset,
     )
 
 
@@ -541,3 +547,237 @@ def test_similar_subfund_slug_does_not_grant_ownership() -> None:
             fund_tokens=tokens,
             source_url=foreign_url,
         )
+
+
+# The homepage of Nemomax, whose legal name carries the boilerplate
+# phrase "s proměnným základním kapitálem". The parameters below are the
+# ones the site prints in its own key/value table.
+NEMOMAX_HOMEPAGE_URL = "https://nemomax.cz/"
+
+NEMOMAX_HOMEPAGE_TEXT = "\n".join(
+    (
+        "INVESTUJTE DO NEMOVITOSTI",
+        "ZAKLADNI PARAMETRY",
+        "Minimalni investice klienta",
+        "1 mil. Kc",
+        "Investicni horizont klienta",
+        "Strednedoby, 4 roky",
+        "Obhospodarovatel a administrator fondu",
+        "AVANT investicni spolecnost, a.s.",
+        "KONTAKT",
+        "Nemomax investicni fond s promennym zakladnim kapitalem, a.s.",
+        "Hvezdova 1716/2b, 140 00 Praha 4",
+    )
+)
+
+
+def test_legal_form_boilerplate_is_not_an_identity_token() -> None:
+    """
+    "zakladnim" comes from "s proměnným základním kapitálem".
+
+    The mention parser reads a legal name only as far as its
+    "investiční fond" head, so a name token standing after that head can
+    never appear in a mention. Treating it as distinctive made 29 of the
+    341 canonical funds unable to match their own name.
+    """
+
+    from fundscraper.field_extraction import fund_identity_tokens
+
+    assert fund_identity_tokens(
+        "Nemomax investiční fond s proměnným základním kapitálem, a.s."
+    ) == ("nemomax",)
+
+
+def test_fund_recognises_its_own_name_on_its_own_homepage() -> None:
+    """The whole delivery of Nemomax was refused as belonging to another fund."""
+
+    assert (
+        scope_of(
+            fund_name="Nemomax investiční fond s proměnným základním kapitálem, a.s.",
+            url=NEMOMAX_HOMEPAGE_URL,
+            title="Nemomax",
+            text=NEMOMAX_HOMEPAGE_TEXT,
+            quote="Investicni horizont klienta\nStrednedoby, 4 roky",
+        )
+        is SourceScope.EXACT_FUND
+    )
+
+
+def test_homepage_of_a_fund_yields_its_published_parameters() -> None:
+    document = create_extraction_document(
+        source_id=1,
+        url=NEMOMAX_HOMEPAGE_URL,
+        title="Nemomax",
+        text=NEMOMAX_HOMEPAGE_TEXT,
+        document_type="marketing_page",
+    )
+
+    result = extract_fund_fields(
+        fund_name="Nemomax investiční fond s proměnným základním kapitálem, a.s.",
+        documents=[document],
+        fund_web="https://nemomax.cz",
+    )
+
+    assert result.investment_horizon.status is FieldStatus.FOUND
+    assert result.investment_horizon.value is not None
+    assert result.investment_horizon.value.recommended_years == 4
+
+
+def test_boilerplate_token_removal_does_not_widen_a_shared_name() -> None:
+    """
+    Two funds of one house differ only by their distinctive words.
+
+    Dropping the legal-form boilerplate must not let the page of one of
+    them answer for the other.
+    """
+
+    text = "\n".join(
+        (
+            "SPM FINANCE investicni fond s promennym zakladnim kapitalem, a.s.",
+            "Minimalni investice cini 3 000 000 Kc.",
+        )
+    )
+
+    assert (
+        scope_of(
+            fund_name="SPM GROUP investiční fond s proměnným základním kapitálem, a.s.",
+            url="https://www.spmgroup.cz/fondy/spm-finance/",
+            title="SPM FINANCE",
+            text=text,
+            quote="Minimalni investice cini 3 000 000 Kc.",
+        )
+        is not SourceScope.EXACT_FUND
+    )
+
+
+# One fund whose canonical website is its own host, and one whose
+# canonical website is a page on a shared administrator hub.
+OWN_SITE_FUNDS = (
+    FundInput(name="Lázeňský fond SICAV a.s.", web="https://lazenskyfond.cz"),
+    FundInput(
+        name="Nemomax investiční fond s proměnným základním kapitálem, a.s.",
+        web="https://nemomax.cz",
+    ),
+    FundInput(name="CARE SICAV, a.s.", web="https://www.codyainvest.cz/nase-fondy/care-sicav-a-s"),
+    FundInput(
+        name="3M FUND MSI SICAV a.s.",
+        web="https://www.codyainvest.cz/nase-fondy/3m-fund-msi-sicav-a-s",
+    ),
+    # Two funds of one administrator, both pointing at its bare hub.
+    FundInput(name="NEW EUROPE SICAV a.s.", web="https://www.avantfunds.cz"),
+    FundInput(name="Numero Fund SICAV, a.s.", web="https://www.avantfunds.cz/"),
+)
+
+
+def test_official_site_index_holds_only_hosts_one_fund_claims() -> None:
+    index = build_official_site_index(OWN_SITE_FUNDS)
+
+    assert index == {
+        "lazenskyfond.cz": "Lázeňský fond SICAV a.s.",
+        "nemomax.cz": "Nemomax investiční fond s proměnným základním kapitálem, a.s.",
+    }
+
+
+def test_shared_administrator_host_never_grants_ownership() -> None:
+    """A manager domain alone must not prove that a document is the fund's."""
+
+    index = build_official_site_index(OWN_SITE_FUNDS)
+
+    assert not official_site_owns_page(
+        fund_name="NEW EUROPE SICAV a.s.",
+        source_url="https://www.avantfunds.cz/fondy/numero-fund-sicav-a-s/",
+        official_site=index,
+    )
+
+
+def test_fund_specific_hub_path_does_not_claim_the_whole_hub() -> None:
+    index = build_official_site_index(OWN_SITE_FUNDS)
+
+    assert "codyainvest.cz" not in index
+
+
+def test_own_website_supplies_the_value_it_publishes_on_its_homepage() -> None:
+    """
+    Lázeňský fond states its assets on its own homepage.
+
+    The page names the fund in a declined form the mention parser cannot
+    match, so the homepage of the fund read as the page of a foreign one
+    and every value on it was refused.
+    """
+
+    # The order of the real homepage: the figures stand above the
+    # marketing line that declines the fund's own name.
+    text = "\n".join(
+        (
+            "Hodnota aktiv pod spravou: 1,3 mld. CZK",
+            "31. 12. 2025",
+            "Tradice, stability, zdravi. Investujte do lazenskeho fondu SICAV a.s.",
+        )
+    )
+
+    index = build_official_site_index(OWN_SITE_FUNDS)
+
+    with official_site_identity(index):
+        assert (
+            scope_of(
+                fund_name="Lázeňský fond SICAV a.s.",
+                url="https://lazenskyfond.cz/",
+                title="Lázeňský fond",
+                text=text,
+                quote="Hodnota aktiv pod spravou: 1,3 mld. CZK",
+                value_offset=0,
+            )
+            is SourceScope.EXACT_FUND
+        )
+
+
+def test_own_website_still_refuses_a_section_about_another_fund() -> None:
+    """Owning the page does not make a neighbour's section this fund's."""
+
+    text = "\n".join(
+        (
+            "Lazensky fond SICAV a.s.",
+            "ECFS Credit Fund SICAV, a.s.",
+            "Cilovy vynos fondu je 8 % p.a.",
+        )
+    )
+
+    index = build_official_site_index(OWN_SITE_FUNDS)
+
+    document = create_extraction_document(
+        source_id=1,
+        url="https://lazenskyfond.cz/partneri",
+        title="Partneri",
+        text=text,
+        document_type="marketing_page",
+    )
+
+    with official_site_identity(index):
+        result = extract_fund_fields(
+            fund_name="Lázeňský fond SICAV a.s.",
+            documents=[document],
+            fund_web="https://lazenskyfond.cz",
+        )
+
+    assert result.target_return.status is not FieldStatus.FOUND
+
+
+def test_without_the_index_identity_is_decided_exactly_as_before() -> None:
+    text = "\n".join(
+        (
+            "Tradice, stability, zdravi. Investujte do lazenskeho fondu SICAV a.s.",
+            "Hodnota aktiv pod spravou: 1,3 mld. CZK",
+        )
+    )
+
+    assert (
+        scope_of(
+            fund_name="Lázeňský fond SICAV a.s.",
+            url="https://lazenskyfond.cz/",
+            title="Lázeňský fond",
+            text=text,
+            quote="Hodnota aktiv pod spravou: 1,3 mld. CZK",
+            value_offset=text.index("Hodnota"),
+        )
+        is not SourceScope.EXACT_FUND
+    )

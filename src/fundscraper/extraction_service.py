@@ -25,8 +25,10 @@ from fundscraper.extended_persistence import (
 from fundscraper.field_extraction import (
     ExtractionDocument,
     IsinIdentityIndex,
+    OfficialSiteIndex,
     extract_fund_fields,
     official_isin_identity,
+    official_site_identity,
 )
 from fundscraper.models import FundInput
 from fundscraper.output_models import (
@@ -87,6 +89,7 @@ def extract_fund_data(
     fund: FundInput,
     ledger: ConflictLedger | None = None,
     isin_identity: IsinIdentityIndex | None = None,
+    official_site: OfficialSiteIndex | None = None,
 ) -> ExtractionSummary:
     """
     Extract supported fields and update one fund in output JSON.
@@ -95,6 +98,13 @@ def extract_fund_data(
     It is optional because the delivered output does not depend on it:
     the winner and its losing alternatives reach the file either way, and
     the ledger is what the conflict report is written from.
+
+    ``official_site`` is the register of hosts that are one fund's own
+    official website, built from the canonical input. When it is given, a
+    page served from this fund's own site is identified as the fund's
+    without the page having to repeat its full legal name, which a
+    homepage rarely does. Left out, identity is decided exactly as it was
+    before the register existed.
 
     ``isin_identity`` is the official ISIN register. When it is given, a
     document that prints an official ISIN of this fund is identified by
@@ -142,7 +152,7 @@ def extract_fund_data(
                 )
             )
 
-        with official_isin_identity(isin_identity):
+        with official_isin_identity(isin_identity), official_site_identity(official_site):
             extracted = extract_fund_fields(
                 fund_name=fund.name,
                 documents=documents,

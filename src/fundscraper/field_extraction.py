@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left
-from collections.abc import Callable, Hashable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -48,6 +48,8 @@ from fundscraper.field_definitions import (
     states_no_published_return,
 )
 from fundscraper.html_discovery import normalize_search_text
+from fundscraper.models import FundInput
+from fundscraper.normalization import canonical_domain
 from fundscraper.output_models import (
     AssetsUnderManagementValue,
     AumMetricType,
@@ -152,6 +154,33 @@ MINIMUM_INVESTMENT_PATTERN = re.compile(
     )
     .{{0,100}}?
     (?P<amount>{NUMBER_PATTERN})
+    \s*
+    # A fund website states the subscription minimum in words -
+    # "1 mil. Kč", "3,5 mil. Kč" - as often as it writes it out. The
+    # group is named as the money pattern names it, so the same reader
+    # applies the scale.
+    (?P<multiplier>
+        tis
+        |
+        tisic
+        |
+        mil
+        |
+        milion
+        |
+        milionu
+        |
+        million
+        |
+        mld
+        |
+        miliarda
+        |
+        miliard
+        |
+        billion
+    )?
+    \.?
     \s*
     (?P<currency>czk|kc|eur|usd)
     """,
@@ -785,6 +814,15 @@ FUND_NAME_NOISE_TOKENS: Final[frozenset[str]] = frozenset(
         "otevreny",
         "uzavreny",
         "promennym",
+        # "s proměnným základním kapitálem" is the legal form of a SICAV,
+        # written out in the registered name of 29 of the canonical funds.
+        # None of its three words tells one fund from another, and a
+        # mention is only read as far as its "investiční fond" head, so a
+        # token standing behind that head can never appear in one. Left
+        # in, it made those funds unable to match their own legal name -
+        # on their own homepage the name then read as a foreign fund and
+        # every value on the page was refused.
+        "zakladnim",
         "kapitalem",
     }
 )
@@ -936,7 +974,10 @@ def extract_minimum_investment(
             # The number is the price or value of one investment share.
             continue
 
-        amount = parse_number(match.group("amount"))
+        # The scale word is applied before the fraction guard below:
+        # "3,5 mil. Kč" is a whole number of crowns, and refusing it as a
+        # fraction would lose a minimum the site states plainly.
+        amount = parse_money_amount(match)
 
         currency = normalize_currency(match.group("currency"))
 
@@ -1744,10 +1785,16 @@ def _parse_fee_tiers(
 
     used: set[int] = set()
 
+    clauses = _clause_spans(normalized)
+
     for start, from_months, to_months in _holding_periods(normalized):
-        rate = _rate_after(
+        rate = _rate_of_period(
             percentages=percentages,
             start=start,
+            clause=_clause_of(
+                clauses=clauses,
+                offset=start,
+            ),
             used=used,
         )
 
@@ -1850,23 +1897,97 @@ def _holding_periods(
     return sorted(periods)
 
 
-def _rate_after(
+def _clause_spans(
+    normalized: str,
+) -> tuple[tuple[int, int], ...]:
+    """
+    Return the comma-separated clauses of one fee line.
+
+    A fee schedule states one period and its rate per clause, in either
+    order: "do 1 roku - 10 %, po 1 roce 0 %" and "0 % po 3 letech, 5 % do
+    3 let" both do. The clause is what keeps a period from taking the
+    rate of its neighbour.
+    """
+
+    spans: list[tuple[int, int]] = []
+
+    start = 0
+
+    for index, character in enumerate(normalized):
+        if character in ",;":
+            spans.append(
+                (
+                    start,
+                    index,
+                )
+            )
+
+            start = index + 1
+
+    spans.append(
+        (
+            start,
+            len(normalized),
+        )
+    )
+
+    return tuple(spans)
+
+
+def _clause_of(
+    *,
+    clauses: tuple[tuple[int, int], ...],
+    offset: int,
+) -> tuple[int, int]:
+    """Return the clause an offset falls in."""
+
+    for span in clauses:
+        if span[0] <= offset <= span[1]:
+            return span
+
+    return (
+        0,
+        offset,
+    )
+
+
+def _rate_of_period(
     *,
     percentages: list[tuple[int, float]],
     start: int,
+    clause: tuple[int, int],
     used: set[int],
 ) -> float | None:
-    """Return the first unused percentage stated after a holding period."""
+    """
+    Return the percentage that belongs to one holding period.
 
-    for offset, value in percentages:
-        if offset < start or offset in used:
-            continue
+    Only a percentage of the same clause qualifies. Within it the one
+    stated after the period is preferred, because that is how a fee table
+    is usually written; a clause that puts the rate first - "0 % po 3
+    letech" - is read backwards rather than reaching into the next
+    clause, which published the schedule inverted.
+    """
 
-        used.add(offset)
+    clause_start, clause_end = clause
 
-        return value
+    available = [
+        (offset, value)
+        for offset, value in percentages
+        if clause_start <= offset <= clause_end and offset not in used
+    ]
 
-    return None
+    following = [item for item in available if item[0] >= start]
+
+    preceding = [item for item in available if item[0] < start]
+
+    chosen = following[0] if following else (preceding[-1] if preceding else None)
+
+    if chosen is None:
+        return None
+
+    used.add(chosen[0])
+
+    return chosen[1]
 
 
 def _fee_frequency(
@@ -2820,6 +2941,102 @@ _ISIN_ASSERTABLE: Final[frozenset[SourceScope]] = frozenset(
 )
 
 
+# Canonical host -> the one fund whose official website it is. Built from
+# the canonical input, so an entry means the operator recorded that host
+# as this fund's own site and no other fund claims it.
+type OfficialSiteIndex = Mapping[str, str]
+
+
+_OFFICIAL_SITE: Final[ContextVar[OfficialSiteIndex | None]] = ContextVar(
+    "fundscraper_official_site",
+    default=None,
+)
+
+
+def build_official_site_index(
+    funds: Iterable[FundInput],
+) -> dict[str, str]:
+    """
+    Return the hosts that are one fund's own official website.
+
+    A host qualifies only when the canonical input points one fund at its
+    bare root and no other fund points anywhere on it. Both halves are
+    needed: an administrator hub is the recorded website of dozens of
+    funds, and a fund whose entry is a page inside such a hub owns that
+    page, not the hub.
+    """
+
+    claims: dict[str, list[FundInput]] = {}
+
+    for fund in funds:
+        if not fund.web:
+            continue
+
+        claims.setdefault(canonical_domain(fund.web), []).append(fund)
+
+    index: dict[str, str] = {}
+
+    for host, claimants in claims.items():
+        if not host or len(claimants) != 1:
+            continue
+
+        parts = urlsplit(claimants[0].web or "")
+
+        if parts.path.strip("/") or parts.query:
+            continue
+
+        index[host] = claimants[0].name
+
+    return index
+
+
+@contextmanager
+def official_site_identity(
+    index: OfficialSiteIndex | None,
+) -> Iterator[None]:
+    """
+    Make the official-website register available to identity decisions.
+
+    Entering with None - or with an empty index - changes nothing, so a
+    caller without the canonical input behaves exactly as before.
+    """
+
+    token = _OFFICIAL_SITE.set(index or None)
+
+    try:
+        yield
+    finally:
+        _OFFICIAL_SITE.reset(token)
+
+
+def active_official_site() -> OfficialSiteIndex | None:
+    """Return the register of the current extraction run, if one was set."""
+
+    return _OFFICIAL_SITE.get()
+
+
+def official_site_owns_page(
+    *,
+    fund_name: str,
+    source_url: str,
+    official_site: OfficialSiteIndex | None = None,
+) -> bool:
+    """
+    Return whether a page is served from this fund's own official website.
+
+    This settles only whose page it is. It says nothing about what a value
+    on the page means, and it does not make a section of the page that
+    presents a different fund belong to this one.
+    """
+
+    index = official_site if official_site is not None else _OFFICIAL_SITE.get()
+
+    if not index or not source_url:
+        return False
+
+    return index.get(canonical_domain(source_url)) == fund_name
+
+
 def official_isin_scope(
     *,
     fund_name: str,
@@ -2966,6 +3183,18 @@ def classify_source_scope(
     else:
         normalized_document = normalize_search_text(document_text)
 
+    # The page of a fund's own website belongs to that fund even where
+    # its text names the depositary, the manager or itself in a declined
+    # form the mention parser cannot match. The address of a document
+    # inside a fund's own path says the same thing.
+    owns_the_page = url_identifies_fund(
+        fund_tokens=fund_tokens,
+        source_url=source_url,
+    ) or official_site_owns_page(
+        fund_name=fund_name,
+        source_url=source_url,
+    )
+
     if names_another_fund(
         text=normalized_document,
         fund_tokens=fund_tokens,
@@ -2979,10 +3208,7 @@ def classify_source_scope(
             identity_text=identity_text,
             normalized_quote=normalized_quote,
             value_offset=value_offset,
-            owns_the_page=url_identifies_fund(
-                fund_tokens=fund_tokens,
-                source_url=source_url,
-            ),
+            owns_the_page=owns_the_page,
         )
 
     confirms_fund, names_some_fund = _named_fund_matches(
@@ -3004,6 +3230,12 @@ def classify_source_scope(
         fund_tokens=fund_tokens,
         text=identity_text,
     ):
+        return _confirmed_scope(
+            identity_text=identity_text,
+            normalized_quote=normalized_quote,
+        )
+
+    if owns_the_page:
         return _confirmed_scope(
             identity_text=identity_text,
             normalized_quote=normalized_quote,

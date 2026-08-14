@@ -44,6 +44,7 @@ from fundscraper.extraction_service import (
     ExtractionSummary,
     extract_fund_data,
 )
+from fundscraper.field_extraction import OfficialSiteIndex
 from fundscraper.html_discovery import DiscoveredLink
 from fundscraper.http_client import HttpFetcher
 from fundscraper.models import FundInput
@@ -383,6 +384,9 @@ async def run_fund_pipeline(
     budget: CrawlBudget | None = None,
     wanted_document_types: frozenset[DocumentType] = frozenset(),
     crawl_pass: CrawlPass = CrawlPass.FAST,
+    # The register of hosts that are one fund's own official website,
+    # built from the canonical input by the caller that holds it.
+    official_site: OfficialSiteIndex | None = None,
 ) -> FundPipelineResult:
     """Run adapter discovery, crawl, parsing and extraction for one fund."""
 
@@ -586,6 +590,7 @@ async def run_fund_pipeline(
                 database_path=database_path,
                 output_path=output_path,
                 fund=fund,
+                official_site=official_site,
             )
         else:
             async with output_lock:
@@ -594,6 +599,7 @@ async def run_fund_pipeline(
                     database_path=database_path,
                     output_path=output_path,
                     fund=fund,
+                    official_site=official_site,
                 )
 
         extract_seconds = perf_counter() - extract_started
@@ -791,6 +797,7 @@ async def run_fund_batch(
     amista_fallback: bool = False,
     porovnejfondy_fallback: bool = False,
     anydoc_fallback: bool = False,
+    official_site: OfficialSiteIndex | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> BatchPipelineSummary:
     """Run multiple funds concurrently with serialized output writes."""
@@ -829,6 +836,7 @@ async def run_fund_batch(
                 amista_fallback=amista_fallback,
                 porovnejfondy_fallback=porovnejfondy_fallback,
                 anydoc_fallback=anydoc_fallback,
+                official_site=official_site,
                 output_lock=output_lock,
             )
 

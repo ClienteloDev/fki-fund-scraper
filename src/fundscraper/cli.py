@@ -72,6 +72,9 @@ from fundscraper.fallback_sources import (
 from fundscraper.fetch_service import (
     fetch_fund_start_page,
 )
+from fundscraper.field_extraction import (
+    build_official_site_index,
+)
 from fundscraper.grounded_application import (
     GroundedApplicationSummary,
     apply_grounded_decisions,
@@ -1179,6 +1182,7 @@ def extract_fund_command(
             database_path=database_path,
             output_path=output_path,
             fund=fund,
+            official_site=build_official_site_index(funds),
         )
     except (
         InputFileError,
@@ -1351,6 +1355,7 @@ def run_fund_command(
                     max_depth=max_depth,
                     max_documents=max_documents,
                     force=force,
+                    official_site=(build_official_site_index(funds)),
                 )
 
         result = asyncio.run(run_pipeline())
@@ -1591,6 +1596,7 @@ def run_sample_command(
                     document_concurrency=document_concurrency,
                     concurrency=concurrency,
                     force=force,
+                    official_site=(build_official_site_index(funds)),
                     progress_callback=show_progress,
                 )
 
@@ -1892,6 +1898,7 @@ def run_retry_command(
                     avant_fallback=avant_fallback,
                     amista_fallback=amista_fallback,
                     porovnejfondy_fallback=(porovnejfondy_fallback),
+                    official_site=(build_official_site_index(master_funds)),
                     progress_callback=show_progress,
                 )
 
