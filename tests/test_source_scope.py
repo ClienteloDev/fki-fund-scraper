@@ -9,13 +9,9 @@ from __future__ import annotations
 
 from fundscraper.field_extraction import (
     SourceScope,
-    build_official_site_index,
     classify_source_scope,
     extract_fund_fields,
-    official_site_identity,
-    official_site_owns_page,
 )
-from fundscraper.models import FundInput
 from fundscraper.output_models import FieldStatus, ReasonCode, ScopeType
 from tests.test_field_extraction import create_extraction_document
 
@@ -650,134 +646,65 @@ def test_boilerplate_token_removal_does_not_widen_a_shared_name() -> None:
     )
 
 
-# One fund whose canonical website is its own host, and one whose
-# canonical website is a page on a shared administrator hub.
-OWN_SITE_FUNDS = (
-    FundInput(name="Lázeňský fond SICAV a.s.", web="https://lazenskyfond.cz"),
-    FundInput(
-        name="Nemomax investiční fond s proměnným základním kapitálem, a.s.",
-        web="https://nemomax.cz",
-    ),
-    FundInput(name="CARE SICAV, a.s.", web="https://www.codyainvest.cz/nase-fondy/care-sicav-a-s"),
-    FundInput(
-        name="3M FUND MSI SICAV a.s.",
-        web="https://www.codyainvest.cz/nase-fondy/3m-fund-msi-sicav-a-s",
-    ),
-    # Two funds of one administrator, both pointing at its bare hub.
-    FundInput(name="NEW EUROPE SICAV a.s.", web="https://www.avantfunds.cz"),
-    FundInput(name="Numero Fund SICAV, a.s.", web="https://www.avantfunds.cz/"),
+# The FAQ page of a manager whose brand host the canonical input records as
+# one fund's website. The page names no fund of its own in a form the mention
+# parser recognises, and the figure it states is about qualified investor
+# funds in general.
+MANAGER_FAQ_URL = "https://akro.cz/otazky/"
+
+MANAGER_FAQ_TEXT = "\n".join(
+    (
+        "Nejcastejsi otazky",
+        "AKRO fond progresivnich spolecnosti, otevreny podilovy fond,",
+        "AKRO investicni spolecnost, a.s., ISIN: CZ0008471091",
+        "Jake jsou minimalni investice do fondu kvalifikovanych investoru?",
+        "Minimalni investice do fondu kvalifikovanych investoru je obvykle 1 000 000 CZK,",
+        "ale muze byt i vyssi v zavislosti na konkretnim fondu.",
+    )
 )
 
 
-def test_official_site_index_holds_only_hosts_one_fund_claims() -> None:
-    index = build_official_site_index(OWN_SITE_FUNDS)
-
-    assert index == {
-        "lazenskyfond.cz": "Lázeňský fond SICAV a.s.",
-        "nemomax.cz": "Nemomax investiční fond s proměnným základním kapitálem, a.s.",
-    }
-
-
-def test_shared_administrator_host_never_grants_ownership() -> None:
-    """A manager domain alone must not prove that a document is the fund's."""
-
-    index = build_official_site_index(OWN_SITE_FUNDS)
-
-    assert not official_site_owns_page(
-        fund_name="NEW EUROPE SICAV a.s.",
-        source_url="https://www.avantfunds.cz/fondy/numero-fund-sicav-a-s/",
-        official_site=index,
-    )
-
-
-def test_fund_specific_hub_path_does_not_claim_the_whole_hub() -> None:
-    index = build_official_site_index(OWN_SITE_FUNDS)
-
-    assert "codyainvest.cz" not in index
-
-
-def test_own_website_supplies_the_value_it_publishes_on_its_homepage() -> None:
+def test_own_host_does_not_adopt_a_page_that_names_no_fund() -> None:
     """
-    Lázeňský fond states its assets on its own homepage.
+    A host recorded for one fund is not always that fund's own site.
 
-    The page names the fund in a declined form the mention parser cannot
-    match, so the homepage of the fund read as the page of a foreign one
-    and every value on it was refused.
+    The canonical input records a manager's brand host as the website of a
+    single fund, and the manager's pages talk about its other products and
+    about qualified investor funds in general. Accepting such a page merely
+    because the host is in the register gave ALT a minimum investment, a
+    target return, assets and both parties out of AKRO's own material.
     """
-
-    # The order of the real homepage: the figures stand above the
-    # marketing line that declines the fund's own name.
-    text = "\n".join(
-        (
-            "Hodnota aktiv pod spravou: 1,3 mld. CZK",
-            "31. 12. 2025",
-            "Tradice, stability, zdravi. Investujte do lazenskeho fondu SICAV a.s.",
-        )
-    )
-
-    index = build_official_site_index(OWN_SITE_FUNDS)
-
-    with official_site_identity(index):
-        assert (
-            scope_of(
-                fund_name="Lázeňský fond SICAV a.s.",
-                url="https://lazenskyfond.cz/",
-                title="Lázeňský fond",
-                text=text,
-                quote="Hodnota aktiv pod spravou: 1,3 mld. CZK",
-                value_offset=0,
-            )
-            is SourceScope.EXACT_FUND
-        )
-
-
-def test_own_website_still_refuses_a_section_about_another_fund() -> None:
-    """Owning the page does not make a neighbour's section this fund's."""
-
-    text = "\n".join(
-        (
-            "Lazensky fond SICAV a.s.",
-            "ECFS Credit Fund SICAV, a.s.",
-            "Cilovy vynos fondu je 8 % p.a.",
-        )
-    )
-
-    index = build_official_site_index(OWN_SITE_FUNDS)
-
-    document = create_extraction_document(
-        source_id=1,
-        url="https://lazenskyfond.cz/partneri",
-        title="Partneri",
-        text=text,
-        document_type="marketing_page",
-    )
-
-    with official_site_identity(index):
-        result = extract_fund_fields(
-            fund_name="Lázeňský fond SICAV a.s.",
-            documents=[document],
-            fund_web="https://lazenskyfond.cz",
-        )
-
-    assert result.target_return.status is not FieldStatus.FOUND
-
-
-def test_without_the_index_identity_is_decided_exactly_as_before() -> None:
-    text = "\n".join(
-        (
-            "Tradice, stability, zdravi. Investujte do lazenskeho fondu SICAV a.s.",
-            "Hodnota aktiv pod spravou: 1,3 mld. CZK",
-        )
-    )
 
     assert (
         scope_of(
-            fund_name="Lázeňský fond SICAV a.s.",
-            url="https://lazenskyfond.cz/",
-            title="Lázeňský fond",
-            text=text,
-            quote="Hodnota aktiv pod spravou: 1,3 mld. CZK",
-            value_offset=text.index("Hodnota"),
+            fund_name="ALT investiční fond SICAV a.s.",
+            url=MANAGER_FAQ_URL,
+            title="Otazky",
+            text=MANAGER_FAQ_TEXT,
+            quote=(
+                "Minimalni investice do fondu kvalifikovanych investoru je obvykle 1 000 000 CZK"
+            ),
+            value_offset=MANAGER_FAQ_TEXT.index("Minimalni investice"),
         )
         is not SourceScope.EXACT_FUND
     )
+
+
+def test_generic_qualified_investor_minimum_is_not_this_funds_minimum() -> None:
+    """The whole extraction must refuse it, not only the scope call."""
+
+    document = create_extraction_document(
+        source_id=1,
+        url=MANAGER_FAQ_URL,
+        title="Otazky",
+        text=MANAGER_FAQ_TEXT,
+        document_type="marketing_page",
+    )
+
+    result = extract_fund_fields(
+        fund_name="ALT investiční fond SICAV a.s.",
+        documents=[document],
+        fund_web="https://akro.cz",
+    )
+
+    assert result.minimum_investment.status is not FieldStatus.FOUND

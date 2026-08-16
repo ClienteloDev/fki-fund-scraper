@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left
-from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Hashable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -48,8 +48,6 @@ from fundscraper.field_definitions import (
     states_no_published_return,
 )
 from fundscraper.html_discovery import normalize_search_text
-from fundscraper.models import FundInput
-from fundscraper.normalization import canonical_domain
 from fundscraper.output_models import (
     AssetsUnderManagementValue,
     AumMetricType,
@@ -2941,102 +2939,6 @@ _ISIN_ASSERTABLE: Final[frozenset[SourceScope]] = frozenset(
 )
 
 
-# Canonical host -> the one fund whose official website it is. Built from
-# the canonical input, so an entry means the operator recorded that host
-# as this fund's own site and no other fund claims it.
-type OfficialSiteIndex = Mapping[str, str]
-
-
-_OFFICIAL_SITE: Final[ContextVar[OfficialSiteIndex | None]] = ContextVar(
-    "fundscraper_official_site",
-    default=None,
-)
-
-
-def build_official_site_index(
-    funds: Iterable[FundInput],
-) -> dict[str, str]:
-    """
-    Return the hosts that are one fund's own official website.
-
-    A host qualifies only when the canonical input points one fund at its
-    bare root and no other fund points anywhere on it. Both halves are
-    needed: an administrator hub is the recorded website of dozens of
-    funds, and a fund whose entry is a page inside such a hub owns that
-    page, not the hub.
-    """
-
-    claims: dict[str, list[FundInput]] = {}
-
-    for fund in funds:
-        if not fund.web:
-            continue
-
-        claims.setdefault(canonical_domain(fund.web), []).append(fund)
-
-    index: dict[str, str] = {}
-
-    for host, claimants in claims.items():
-        if not host or len(claimants) != 1:
-            continue
-
-        parts = urlsplit(claimants[0].web or "")
-
-        if parts.path.strip("/") or parts.query:
-            continue
-
-        index[host] = claimants[0].name
-
-    return index
-
-
-@contextmanager
-def official_site_identity(
-    index: OfficialSiteIndex | None,
-) -> Iterator[None]:
-    """
-    Make the official-website register available to identity decisions.
-
-    Entering with None - or with an empty index - changes nothing, so a
-    caller without the canonical input behaves exactly as before.
-    """
-
-    token = _OFFICIAL_SITE.set(index or None)
-
-    try:
-        yield
-    finally:
-        _OFFICIAL_SITE.reset(token)
-
-
-def active_official_site() -> OfficialSiteIndex | None:
-    """Return the register of the current extraction run, if one was set."""
-
-    return _OFFICIAL_SITE.get()
-
-
-def official_site_owns_page(
-    *,
-    fund_name: str,
-    source_url: str,
-    official_site: OfficialSiteIndex | None = None,
-) -> bool:
-    """
-    Return whether a page is served from this fund's own official website.
-
-    This settles only whose page it is. It says nothing about what a value
-    on the page means, and it does not make a section of the page that
-    presents a different fund belong to this one.
-    """
-
-    index = official_site if official_site is not None else _OFFICIAL_SITE.get()
-
-    if not index or not source_url:
-        return False
-
-    return index.get(canonical_domain(source_url)) == fund_name
-
-
 def official_isin_scope(
     *,
     fund_name: str,
@@ -3183,15 +3085,10 @@ def classify_source_scope(
     else:
         normalized_document = normalize_search_text(document_text)
 
-    # The page of a fund's own website belongs to that fund even where
-    # its text names the depositary, the manager or itself in a declined
-    # form the mention parser cannot match. The address of a document
-    # inside a fund's own path says the same thing.
+    # A document filed under an address that spells out this fund's name
+    # belongs to it, even where the page also presents its neighbours.
     owns_the_page = url_identifies_fund(
         fund_tokens=fund_tokens,
-        source_url=source_url,
-    ) or official_site_owns_page(
-        fund_name=fund_name,
         source_url=source_url,
     )
 
@@ -3230,12 +3127,6 @@ def classify_source_scope(
         fund_tokens=fund_tokens,
         text=identity_text,
     ):
-        return _confirmed_scope(
-            identity_text=identity_text,
-            normalized_quote=normalized_quote,
-        )
-
-    if owns_the_page:
         return _confirmed_scope(
             identity_text=identity_text,
             normalized_quote=normalized_quote,

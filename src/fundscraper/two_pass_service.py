@@ -37,10 +37,6 @@ from fundscraper.crawl_planning import (
     select_deep_pass_funds,
 )
 from fundscraper.database import initialize_database, register_funds
-from fundscraper.field_extraction import (
-    OfficialSiteIndex,
-    build_official_site_index,
-)
 from fundscraper.http_client import HttpFetcher
 from fundscraper.models import FundInput
 from fundscraper.output_service import load_output, stable_fund_id
@@ -198,11 +194,6 @@ async def run_two_pass(
 
     started_at = datetime.now(UTC)
 
-    # Which hosts are one fund's own official website. The canonical list
-    # is already here, and this is the only place that knows whether a
-    # host is claimed by one fund or by twenty.
-    official_site = build_official_site_index(canonical_funds)
-
     initialize_database(database_path)
 
     register_funds(
@@ -241,7 +232,6 @@ async def run_two_pass(
         anydoc_fallback=anydoc_fallback,
         output_lock=output_lock,
         run_id=f"{run_id}-fast",
-        official_site=official_site,
         progress=progress,
     )
 
@@ -300,7 +290,6 @@ async def run_two_pass(
             anydoc_fallback=anydoc_fallback,
             output_lock=output_lock,
             run_id=f"{run_id}-deep",
-            official_site=official_site,
             progress=progress,
         )
 
@@ -335,7 +324,6 @@ async def _run_pass(
     anydoc_fallback: bool,
     output_lock: asyncio.Lock,
     run_id: str,
-    official_site: OfficialSiteIndex | None = None,
     progress: TwoPassProgress | None = None,
 ) -> list[FundPipelineResult]:
     """Run one pass over a list of funds, at the given budget."""
@@ -371,7 +359,6 @@ async def _run_pass(
                 discovery_run_id=run_id,
                 budget=budget,
                 crawl_pass=crawl_pass,
-                official_site=official_site,
                 wanted_document_types=wanted_by_fund.get(
                     stable_fund_id(fund),
                     frozenset(),
