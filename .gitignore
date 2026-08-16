@@ -68,6 +68,11 @@ reports/*.json
 /data/output/*
 !/data/output/.gitkeep
 
+# Local database checkpoints. Generated data, excluded for the same reason as
+# /data/output and /reports. Git therefore does NOT protect the fund database
+# copies kept under artifacts/checkpoints/ - see the README in each checkpoint.
+/artifacts/
+
 # Generated retry, sample and partial inputs
 /data/input/funds.retry*.json
 /data/input/*retry*.json
