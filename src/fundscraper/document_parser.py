@@ -769,6 +769,7 @@ def parse_markup_document(
         page_number=None,
         text=normalized_text,
         character_count=len(normalized_text),
+        tables=_markup_tables(parser),
     )
 
     return ParsedDocument(
@@ -778,6 +779,72 @@ def parse_markup_document(
         character_count=page.character_count,
         scanned_candidate=False,
     )
+
+
+# How many tables of one page are kept, and how many rows each may carry.
+# A fund page publishes its parameters in one or two grids; a listing page
+# can hold hundreds of rows that would only bloat the parsed cache.
+MAXIMUM_TABLES_PER_PAGE = 40
+
+MAXIMUM_ROWS_PER_TABLE = 200
+
+
+def _markup_tables(
+    parser: LexborHTMLParser,
+) -> tuple[DocumentTable, ...]:
+    """
+    Return the tables of an HTML page as rows of cells.
+
+    A fund that publishes its parameters, its fees or its yearly figures
+    on a web page states them in a grid, exactly as a PDF does. Flattened
+    into text the grid becomes a label on one line and its value on the
+    next, and every extractor that pairs a value with its own label by
+    row - the fee reader above all - was left with nothing to read. The
+    same guards as the PDF path apply, so a one-column layout table is
+    not mistaken for data.
+    """
+
+    tables: list[DocumentTable] = []
+
+    for node in parser.css("table"):
+        if len(tables) >= MAXIMUM_TABLES_PER_PAGE:
+            break
+
+        # Only the innermost table holds data. An outer one is the page
+        # layout, and reading it would repeat every inner row. A CSS
+        # query on a node matches the node itself, so a table that
+        # contains another one selects two.
+        if len(node.css("table")) > 1:
+            continue
+
+        rows: list[tuple[str, ...]] = []
+
+        for row_node in node.css("tr"):
+            if len(rows) >= MAXIMUM_ROWS_PER_TABLE:
+                break
+
+            cells = tuple(
+                " ".join(
+                    cell.text(
+                        separator=" ",
+                        strip=True,
+                    ).split()
+                )
+                for cell in row_node.css("th, td")
+            )
+
+            if any(cell for cell in cells):
+                rows.append(cells)
+
+        if len(rows) < MINIMUM_TABLE_ROWS:
+            continue
+
+        if max((len(row) for row in rows), default=0) < MINIMUM_TABLE_COLUMNS:
+            continue
+
+        tables.append(DocumentTable(rows=tuple(rows)))
+
+    return tuple(tables)
 
 
 def parse_plain_text_document(

@@ -228,3 +228,100 @@ def test_abbreviated_maximum_marks_the_fee_as_a_cap() -> None:
 
     assert entry.rate_percent == 4
     assert entry.maximum is True
+
+
+def test_minimum_investment_written_with_a_scale_word_is_read() -> None:
+    """
+    Fund websites state the subscription minimum as "1 mil. Kč".
+
+    The assets pattern has read a scale word since the beginning; the
+    minimum-investment pattern demanded the currency straight after the
+    number, so every site writing the amount in words lost the field.
+    """
+
+    result = fields("Minimalni investice klienta 1 mil. Kc")
+
+    assert result.minimum_investment.status is FieldStatus.FOUND
+    assert result.minimum_investment.value is not None
+    assert result.minimum_investment.value.amount == 1_000_000
+
+
+def test_decimal_minimum_investment_with_a_scale_word_is_read() -> None:
+    """ "3,5 mil. Kč" is three and a half million, not three."""
+
+    result = fields("Minimalni investice cini 3,5 mil. Kc")
+
+    assert result.minimum_investment.status is FieldStatus.FOUND
+    assert result.minimum_investment.value is not None
+    assert result.minimum_investment.value.amount == 3_500_000
+
+
+def test_scale_word_does_not_rescale_an_absolute_minimum() -> None:
+    """The amount written out in full must keep its own magnitude."""
+
+    result = fields("Minimalni investice cini 1 000 000 Kc, tj. 1 mil. Kc")
+
+    assert result.minimum_investment.status is FieldStatus.FOUND
+    assert result.minimum_investment.value is not None
+    assert result.minimum_investment.value.amount == 1_000_000
+
+
+def test_fractional_share_price_with_no_scale_word_is_still_refused() -> None:
+    """The guard against per-share values must survive the scale word."""
+
+    result = fields("minimalni investice cini 1,1138 kc")
+
+    assert result.minimum_investment.status is not FieldStatus.FOUND
+
+
+def _exit_tiers(text: str) -> list[tuple[int | None, int | None, float | None]]:
+    result = fields(text, document_type="statute")
+
+    assert result.fees.value is not None
+
+    # Sorted by the period, not by where the line happened to state it:
+    # the order of the clauses is incidental, the schedule is not.
+    return sorted(
+        (
+            (tier.from_months, tier.to_months, tier.rate_percent)
+            for item in result.fees.value.items
+            for tier in item.tiers
+        ),
+        key=lambda tier: (tier[0] is None, tier[0]),
+    )
+
+
+def test_fee_tier_binds_the_rate_stated_before_its_period() -> None:
+    """
+    "0 % po 3 letech, 5 % do 3 let" states the rate ahead of its period.
+
+    The tier reader only ever looked forward, so the period "po 3 letech"
+    took the 5 % of the next clause and the schedule was published
+    inverted: an investor leaving inside three years was quoted the rate
+    of one leaving after them.
+    """
+
+    assert _exit_tiers("Vystupni poplatek 0 % po 3 letech, 5 % do 3 let") == [
+        (0, 36, 5.0),
+        (36, None, 0.0),
+    ]
+
+
+def test_fee_tier_still_binds_the_rate_stated_after_its_period() -> None:
+    """The ordinary wording, which has always worked, must keep working."""
+
+    assert _exit_tiers(
+        "Vystupni poplatek do 1 roku - 10 %, od 1 do 2 let - 5 %, po 2 letech 0 %"
+    ) == [
+        (0, 12, 10.0),
+        (12, 24, 5.0),
+        (24, None, 0.0),
+    ]
+
+
+def test_fee_tier_does_not_take_a_rate_from_another_clause() -> None:
+    """A clause without its own rate yields no tier rather than a borrowed one."""
+
+    tiers = _exit_tiers("Vystupni poplatek 5 % do 3 let, dale dle ceniku po 3 letech")
+
+    assert (36, None, 5.0) not in tiers

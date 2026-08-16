@@ -19,6 +19,8 @@ from fundscraper.domain_candidates import (
     distinctive_name_tokens,
 )
 from fundscraper.extended_validation import (
+    AUDIT_RULESET_VERSION,
+    AUDIT_SCHEMA_VERSION,
     FIELD_SPECIFICATIONS,
     FundRecordView,
     ValidationCode,
@@ -27,17 +29,22 @@ from fundscraper.extended_validation import (
     ValueProvenance,
     validate_annual_returns,
     validate_assets_under_management,
+    validate_capital_attribution,
+    validate_capital_metric_wording,
     validate_capital_observations,
     validate_cross_fields,
     validate_fee_items,
     validate_historical_series,
+    validate_horizon_wording,
     validate_investment_horizon,
     validate_minimum_investment,
     validate_news_items,
     validate_party,
     validate_provenance,
+    validate_return_wording,
     validate_target_return,
 )
+from fundscraper.field_extraction import FEE_KEYWORDS
 from fundscraper.html_discovery import normalize_search_text
 from fundscraper.normalization import canonical_domain
 from fundscraper.output_models import (
@@ -173,6 +180,11 @@ FEE_LABEL_KEYWORDS: Final[tuple[str, ...]] = (
 # what the investor pays.
 FEE_INCOME_SHARE_MARKERS: Final[tuple[str, ...]] = (
     "je prijmem",
+    # The number stands inside the phrase as often as it follows it:
+    # "Vystupni poplatek (srazka) je 100 % prijmem do fondu" splits
+    # "je prijmem" in two, which is why one fund delivered an exit fee
+    # of the entire investment.
+    "prijmem",
     "prijmem spolecnosti",
     "nalezi",
     "pripise",
@@ -202,15 +214,27 @@ FEE_RANGE_MARKERS: Final[tuple[str, ...]] = (
 )
 
 
-# Wording that explicitly supports a zero fee.
+# Wording that explicitly supports a zero fee. A key information
+# document states one in its cost table as a plain amount — "U tohoto
+# produktu se neplati zadny vykonnostni poplatek. 0 CZK" — so the
+# amount forms belong here next to the rate forms.
 FEE_ZERO_MARKERS: Final[tuple[str, ...]] = (
     "0 %",
     "0%",
     "0,00 %",
     "0.00 %",
+    "0 czk",
+    "0 eur",
+    "0 usd",
+    "0 kc",
     "bez poplatku",
+    "neplati zadny",
+    "neni aplikovan zadny",
+    "neuctuje zadny",
+    "nehradi zadny",
     "zdarma",
     "no fee",
+    "is charged",
     "free of charge",
 )
 
@@ -295,6 +319,14 @@ class AuditReport(BaseModel):
     generated_at: datetime
     input_path: str
     input_sha256: str
+
+    # What produced this report: the shape of the file, and the rules
+    # that decided its verdicts. Delivery refuses a report whose ruleset
+    # is not the current one, because the same input audited by older
+    # rules yields a different, weaker set of findings.
+    schema_version: str = AUDIT_SCHEMA_VERSION
+    ruleset_version: str = AUDIT_RULESET_VERSION
+
     schema_notes: list[str] = Field(default_factory=list)
     summary: AuditSummary
     findings: list[AuditFinding] = Field(default_factory=list)
@@ -458,6 +490,8 @@ def audit_enriched_output(
         generated_at=(now or datetime.now(UTC)),
         input_path=str(input_path),
         input_sha256=input_sha256,
+        schema_version=AUDIT_SCHEMA_VERSION,
+        ruleset_version=AUDIT_RULESET_VERSION,
         schema_notes=_schema_notes(records),
         summary=AuditSummary(
             funds=len(records),
@@ -1035,7 +1069,13 @@ def _audit_investment_horizon(
 
     return _from_validation(
         context=context,
-        findings=validate_investment_horizon(parsed),
+        findings=[
+            *validate_investment_horizon(parsed),
+            *validate_horizon_wording(
+                parsed,
+                quote=context.quote,
+            ),
+        ],
         value=value,
         normalized_value=f"{parsed.recommended_years:g} years",
     )
@@ -1147,11 +1187,17 @@ def _audit_target_return(
 
     return _from_validation(
         context=context,
-        findings=validate_target_return(
-            parsed,
-            quote=context.quote,
-            source_url=context.source_url,
-        ),
+        findings=[
+            *validate_target_return(
+                parsed,
+                quote=context.quote,
+                source_url=context.source_url,
+            ),
+            *validate_return_wording(
+                parsed,
+                quote=context.quote,
+            ),
+        ],
         value=value,
         normalized_value=" / ".join(f"{item:g} % p.a." for item in stated),
     )
@@ -1255,7 +1301,11 @@ def _audit_fee_item(
             ]
         )
 
-    if rate is not None and rate == 0:
+    # A zero fee reaches the output written either way, and the delivered
+    # data holds far more zero amounts than zero rates: thirty-one fee
+    # items carry a fixed amount of zero with no rate at all, and none of
+    # them was ever checked against its source line.
+    if rate == 0 or fixed_amount == 0:
         findings.extend(
             _audit_zero_fee(
                 context=context,
@@ -1343,7 +1393,39 @@ def _audit_zero_fee(
             )
         ]
 
+    # A key information document states each zero on its own row. When
+    # only one row was captured, every fee type read out of it inherits
+    # that zero: one fund's entry row "Naklady na vstup ... zadny vstupni
+    # poplatek 0 EUR" produced a zero entry fee, which is right, and a
+    # zero performance fee, which the row never mentions.
+    labels = _FEE_TYPE_LABELS.get(fee_type)
+
+    if labels and not any(label in normalized_basis for label in labels):
+        return [
+            _finding(
+                context=context,
+                status=AuditStatus.SUSPICIOUS,
+                reason_code=ValidationCode.ZERO_FEE_OF_ANOTHER_FEE_TYPE.value,
+                reason=(
+                    f"The source line states a zero fee but never names a "
+                    f"{fee_type} fee, so the zero was read from the row of a "
+                    "different fee."
+                ),
+                recommended_action=("Read each fee of the cost table from its own row."),
+                extracted_value=item,
+                normalized_value=normalized_value,
+                evidence=basis,
+            )
+        ]
+
     return []
+
+
+# The wording each fee type is named by, taken from the extraction
+# vocabulary so the audit and the parser recognise the same labels.
+_FEE_TYPE_LABELS: Final[dict[str, tuple[str, ...]]] = {
+    fee_type.value: labels for fee_type, labels in FEE_KEYWORDS
+}
 
 
 def _audit_fee_evidence(
@@ -1542,7 +1624,33 @@ def _income_share_governs_value(
     if label_position < 0:
         return marker_position < value_position
 
-    return label_position < marker_position < value_position
+    if label_position < marker_position < value_position:
+        return True
+
+    # The clause reads the other way round as often as it reads this
+    # way. "Vystupni poplatek (srazka) je 100 % prijmem do fondu" says
+    # the whole fee goes to the fund, not that the fee takes the whole
+    # investment, and the marker follows the number instead of leading
+    # it. Only a marker standing directly after the value counts, so
+    # "Vykonnostni odmena cini 20 % ... je prijmem Fondu", which states
+    # a real fee and mentions its recipient later, keeps passing.
+    value_end = value_position + len(_value_text(normalized_basis, rate))
+
+    return label_position < value_position and 0 <= marker_position - value_end <= 3
+
+
+def _value_text(
+    normalized_basis: str,
+    rate: float,
+) -> str:
+    """Return the number as it is written in the source line."""
+
+    plain = f"{rate:g}"
+
+    if normalized_basis.find(plain) >= 0:
+        return plain
+
+    return plain.replace(".", ",")
 
 
 def _value_position(
@@ -1623,10 +1731,21 @@ def _audit_assets_under_management(
 
     findings = _from_validation(
         context=context,
-        findings=validate_assets_under_management(
-            parsed,
-            today=context.today,
-        ),
+        findings=[
+            *validate_assets_under_management(
+                parsed,
+                today=context.today,
+            ),
+            *validate_capital_attribution(
+                amounts=[parsed.amount],
+                quote=context.quote,
+                fund_name=context.fund_name,
+            ),
+            *validate_capital_metric_wording(
+                metric_type=parsed.metric_type,
+                quote=context.quote,
+            ),
+        ],
         value=value,
         normalized_value=normalized,
     )
@@ -2116,11 +2235,27 @@ def _audit_aum_history(
 
         parsed.append(observation)
 
-    return _from_validation(
-        context=context,
-        findings=validate_capital_observations(parsed),
-        value=value,
-    )
+    return [
+        _explained_small_amount(
+            context=context,
+            finding=finding,
+        )
+        for finding in _from_validation(
+            context=context,
+            findings=[
+                *validate_capital_observations(
+                    parsed,
+                    today=context.today,
+                ),
+                *validate_capital_attribution(
+                    amounts=[observation.amount for observation in parsed],
+                    quote=context.quote,
+                    fund_name=context.fund_name,
+                ),
+            ],
+            value=value,
+        )
+    ]
 
 
 def _audit_annual_returns(
@@ -2190,11 +2325,20 @@ def _audit_historical_values(
                 subject="value series",
             )
 
-    return _from_validation(
-        context=context,
-        findings=validate_historical_series(parsed),
-        value=value,
-    )
+    return [
+        _explained_small_amount(
+            context=context,
+            finding=finding,
+        )
+        for finding in _from_validation(
+            context=context,
+            findings=validate_historical_series(
+                parsed,
+                today=context.today,
+            ),
+            value=value,
+        )
+    ]
 
 
 def _audit_news(

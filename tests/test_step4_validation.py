@@ -24,14 +24,19 @@ from fundscraper.extended_validation import (
     rejects,
     validate_annual_returns,
     validate_assets_under_management,
+    validate_capital_attribution,
+    validate_capital_metric_wording,
     validate_capital_observations,
     validate_cross_fields,
     validate_fallback_extraction,
     validate_fee_items,
     validate_historical_series,
+    validate_horizon_wording,
     validate_investment_horizon,
     validate_minimum_investment,
+    validate_party,
     validate_provenance,
+    validate_return_wording,
     validate_target_return,
 )
 from fundscraper.output_audit import (
@@ -39,6 +44,7 @@ from fundscraper.output_audit import (
     audit_field,
 )
 from fundscraper.output_models import (
+    Annualization,
     AnnualReturnObservation,
     AssetsUnderManagementValue,
     AumMetricType,
@@ -46,12 +52,15 @@ from fundscraper.output_models import (
     Confidence,
     FeeItem,
     FeeType,
+    FundParty,
     HistoricalValueObservation,
     HistoricalValueSeries,
     HistoricalValueType,
+    HorizonKind,
     InvestmentHorizonValue,
     MinimumInvestmentKind,
     MinimumInvestmentValue,
+    PartyRole,
     ReturnSeriesType,
     ReturnType,
     TargetReturnValue,
@@ -1055,3 +1064,767 @@ def test_every_audited_field_has_a_published_specification() -> None:
     for specification in FIELD_SPECIFICATIONS.values():
         assert specification.notes
         assert specification.accepted_scopes
+
+
+# ---------------------------------------------------------------------------
+# Guards that keep a doubted value out of the delivery
+# ---------------------------------------------------------------------------
+#
+# The three below are the ones 3M FUND MSI SICAV a.s. was delivered
+# against: a value series carrying 2026-12-31 and 2027-12-31, a fund
+# capital of 0.5 CZK, and the thousands multiplier of an annual report
+# left unapplied. Each has to reach an audit status the delivery
+# withholds, because a rule nobody acts on delivers the same defect.
+
+
+def test_refuses_a_value_series_that_reports_days_that_have_not_happened() -> None:
+    findings = validate_historical_series(
+        [
+            series(
+                HistoricalValueType.INVESTMENT_SHARE_VALUE,
+                [
+                    (date(2026, 12, 31), 1.0739),
+                    (date(2027, 12, 31), 1.1204),
+                ],
+                share_class="S",
+            )
+        ],
+        today=TODAY,
+    )
+
+    assert ValidationCode.FUTURE_AS_OF_DATE.value in codes(findings)
+
+    detail = next(
+        finding.detail for finding in findings if finding.code is ValidationCode.FUTURE_AS_OF_DATE
+    )
+
+    assert "2026-12-31" in detail
+    assert "2027-12-31" in detail
+
+
+def test_refuses_a_capital_series_that_reports_days_that_have_not_happened() -> None:
+    findings = validate_capital_observations(
+        [
+            observation(
+                530_000_000.0,
+                as_of=date(2025, 12, 31),
+            ),
+            observation(
+                610_000_000.0,
+                as_of=date(2027, 6, 30),
+            ),
+        ],
+        today=TODAY,
+    )
+
+    assert ValidationCode.FUTURE_AS_OF_DATE.value in codes(findings)
+
+
+def test_a_dated_series_wholly_in_the_past_stays_quiet() -> None:
+    assert ValidationCode.FUTURE_AS_OF_DATE.value not in codes(
+        validate_historical_series(
+            [
+                series(
+                    HistoricalValueType.NAV_PER_SHARE,
+                    [
+                        (date(2024, 12, 31), 1.0739),
+                        (date(2025, 12, 31), 1.1204),
+                    ],
+                    share_class="S",
+                )
+            ],
+            today=TODAY,
+        )
+    )
+
+
+def test_refuses_a_value_per_share_stored_as_the_capital_of_the_fund() -> None:
+    findings = validate_historical_series(
+        [
+            series(
+                HistoricalValueType.FUND_CAPITAL,
+                [
+                    (date(2024, 12, 31), 0.5),
+                    (date(2025, 12, 31), 0.53),
+                ],
+            )
+        ],
+        today=TODAY,
+    )
+
+    assert ValidationCode.PER_SHARE_VALUE_AS_AUM.value in codes(findings)
+
+
+def test_the_future_dated_series_of_the_delivered_fund_is_not_valid() -> None:
+    """The whole chain: the rule fires, the audit doubts, delivery withholds."""
+
+    from fundscraper.delivery_export import BLOCKING_AUDIT_STATUSES
+
+    outcome = audit_one(
+        "historical_values",
+        evidence_payload(
+            {
+                "series": [
+                    {
+                        "value_type": "investment_share_value",
+                        "currency": "CZK",
+                        "share_class": "S",
+                        "observations": [
+                            {
+                                "as_of": "2026-12-31",
+                                "value": 1.0739,
+                                "currency": "CZK",
+                            },
+                            {
+                                "as_of": "2027-12-31",
+                                "value": 1.1204,
+                                "currency": "CZK",
+                            },
+                        ],
+                    }
+                ]
+            },
+            quote="Hodnota investiční akcie třídy S",
+        ),
+    )
+
+    assert outcome.status is not AuditStatus.VALID
+
+    assert ValidationCode.FUTURE_AS_OF_DATE.value in {
+        finding.reason_code for finding in outcome.findings
+    }
+
+    assert outcome.status.value in BLOCKING_AUDIT_STATUSES
+
+
+def test_an_unapplied_thousands_multiplier_is_not_valid() -> None:
+    from fundscraper.delivery_export import BLOCKING_AUDIT_STATUSES
+
+    outcome = audit_one(
+        "assets_under_management",
+        evidence_payload(
+            {
+                "amount": 12_202.0,
+                "currency": "CZK",
+                "metric_type": "net_assets",
+                "as_of": "2025-12-31",
+            },
+            url="https://www.examplefond.cz/vyrocni_zprava_2025.pdf",
+            quote="Aktiva celkem 12 202",
+        ),
+    )
+
+    assert outcome.status is not AuditStatus.VALID
+
+    assert ValidationCode.THOUSANDS_UNIT_NOT_APPLIED.value in {
+        finding.reason_code for finding in outcome.findings
+    }
+
+    assert outcome.status.value in BLOCKING_AUDIT_STATUSES
+
+
+# ---------------------------------------------------------------------------
+# The second correctness pass: classes that survived the first audit
+# ---------------------------------------------------------------------------
+
+
+def test_refuses_the_capital_of_a_company_the_fund_holds() -> None:
+    """
+    The 119.35 billion CZK 3M FUND MSI SICAV a.s. delivered as its own.
+
+    The conversion of "119 350 mil. Kc" is exactly right. What the
+    evidence never says is that the money is the fund's: the sentence
+    reduces the equity of MS Trnita 1 s.r.o., a company the fund holds.
+    """
+
+    findings = validate_capital_attribution(
+        amounts=[119_350_000_000.0],
+        quote=(
+            "Na základě souhlasu statutárního\norgánu byl dne 3.7.2023 "
+            "snížen vlastní kapitál společnosti MS Trnitá 1 s.r.o. "
+            "o 119 350 mil. Kč."
+        ),
+        fund_name="3M FUND MSI SICAV a.s.",
+    )
+
+    assert ValidationCode.CAPITAL_OF_ANOTHER_COMPANY.value in codes(findings)
+    assert rejects(findings)
+
+
+def test_keeps_capital_the_evidence_gives_to_the_fund_itself() -> None:
+    """
+    The auditor named in the same paragraph must not cost the fund its value.
+
+    A Czech annual report names its auditor a line above the figures. The
+    amount here belongs to "fond", which stands closer to it than the
+    audit firm does.
+    """
+
+    assert not validate_capital_attribution(
+        amounts=[980_412_000.0],
+        quote=(
+            "Hospodaření fondu bylo ověřeno auditorskou společností "
+            "APOGEO AUDIT s.r.o.\nK 31. 12. 2020 fond vykázal celková "
+            "aktiva ve výši 980 412 tis. Kč"
+        ),
+        fund_name="TOLAR SICAV a. s.",
+    )
+
+
+def test_stays_silent_when_the_amount_is_not_in_the_evidence() -> None:
+    """An amount nobody can locate proves nothing about who owns it."""
+
+    assert not validate_capital_attribution(
+        amounts=[531_000_000.0],
+        quote="Zajištění provádí J & T BANKA, a.s. pro tento fond.",
+        fund_name="FIDUROCK Retail Parks Fund SICAV, a.s.",
+    )
+
+
+def test_refuses_a_party_name_that_opens_with_a_date() -> None:
+    findings = validate_party(
+        party=FundParty(
+            role=PartyRole.ADMINISTRATOR,
+            name="4. 10. 2021 AVANT investiční společnost, a.s.",
+        ),
+        expected_role=PartyRole.ADMINISTRATOR,
+        fund_name=FUND_NAME,
+    )
+
+    assert ValidationCode.PARTY_NAME_CONTAINS_A_DATE.value in codes(findings)
+
+
+def test_refuses_a_party_name_that_opens_with_a_bare_year() -> None:
+    findings = validate_party(
+        party=FundParty(
+            role=PartyRole.ADMINISTRATOR,
+            name="2025 investiční společnost",
+        ),
+        expected_role=PartyRole.ADMINISTRATOR,
+        fund_name=FUND_NAME,
+    )
+
+    assert ValidationCode.PARTY_NAME_CONTAINS_A_DATE.value in codes(findings)
+
+
+def test_keeps_a_company_whose_own_name_begins_with_a_digit() -> None:
+    """A digit is not a date. Real Czech companies open with one."""
+
+    findings = validate_party(
+        party=FundParty(
+            role=PartyRole.MANAGER,
+            name="4stavební a.s.",
+        ),
+        expected_role=PartyRole.MANAGER,
+        fund_name=FUND_NAME,
+    )
+
+    assert ValidationCode.PARTY_NAME_CONTAINS_A_DATE.value not in codes(findings)
+
+
+def test_the_name_cleaner_separates_a_date_from_the_company() -> None:
+    """The root cause: a leading digit was taken to open a legal name."""
+
+    from fundscraper.field_definitions import _without_leading_date
+
+    assert (
+        _without_leading_date("4. 10. 2021 AVANT investiční společnost, a.s.")
+        == "AVANT investiční společnost, a.s."
+    )
+    assert _without_leading_date("23.05.2025 AVANT investiční společnost, a.s.") == (
+        "AVANT investiční společnost, a.s."
+    )
+    assert _without_leading_date("2025 investiční společnost") == "investiční společnost"
+
+    # Digits that belong to the company survive untouched.
+    assert _without_leading_date("3M FUND MSI SICAV a.s.") == "3M FUND MSI SICAV a.s."
+    assert _without_leading_date("4stavební a.s.") == "4stavební a.s."
+    assert _without_leading_date("2025") == "2025"
+
+
+def test_a_fund_capital_series_in_thousands_is_not_valid() -> None:
+    """
+    ARETE ENERGY TRANSITION delivered a fund capital of 24 245 CZK.
+
+    That is not a per-share price and not a fund's capital either. It is
+    an annual report published "v tis. Kc" whose multiplier was lost, and
+    the series had no magnitude rule at all until now.
+    """
+
+    findings = validate_historical_series(
+        [
+            series(
+                HistoricalValueType.FUND_CAPITAL,
+                [(date(2024, 12, 31), 24_245.0)],
+            )
+        ],
+        today=TODAY,
+    )
+
+    assert ValidationCode.IMPLAUSIBLY_SMALL_AUM.value in codes(findings)
+
+
+def test_an_indexed_value_series_around_one_thousand_is_not_valid() -> None:
+    """Max Realitni Fond: 1000, 1005, 1014, 1018 CZK of fund capital."""
+
+    findings = validate_historical_series(
+        [
+            series(
+                HistoricalValueType.FUND_CAPITAL,
+                [
+                    (date(2023, 12, 31), 1_000.0),
+                    (date(2024, 6, 30), 1_005.0),
+                    (date(2024, 12, 31), 1_014.0),
+                ],
+            )
+        ],
+        today=TODAY,
+    )
+
+    assert ValidationCode.IMPLAUSIBLY_SMALL_AUM.value in codes(findings)
+
+
+def test_a_fund_sized_capital_series_keeps_passing() -> None:
+    """The boundary: the rule must not swallow a real fund."""
+
+    assert not validate_historical_series(
+        [
+            series(
+                HistoricalValueType.FUND_CAPITAL,
+                [
+                    (date(2023, 12, 31), 1_000_000.0),
+                    (date(2024, 12, 31), 530_000_000.0),
+                ],
+            )
+        ],
+        today=TODAY,
+    )
+
+
+def test_a_per_share_series_is_still_named_a_per_share_series() -> None:
+    """Below the per-share bound the older, more precise reason wins."""
+
+    findings = validate_historical_series(
+        [
+            series(
+                HistoricalValueType.FUND_CAPITAL,
+                [(date(2024, 12, 31), 0.5)],
+            )
+        ],
+        today=TODAY,
+    )
+
+    assert ValidationCode.PER_SHARE_VALUE_AS_AUM.value in codes(findings)
+    assert ValidationCode.IMPLAUSIBLY_SMALL_AUM.value not in codes(findings)
+
+
+def test_refuses_a_rate_per_annum_no_source_ever_called_annual() -> None:
+    findings = validate_target_return(
+        TargetReturnValue(
+            value_percent_pa=10.0,
+            return_type=ReturnType.EXPECTED,
+            annualization=Annualization.UNKNOWN,
+        ),
+        quote="Expected return 10%",
+        source_url="https://www.examplefond.cz/",
+    )
+
+    assert ValidationCode.UNKNOWN_ANNUALIZATION_FOR_ANNUAL_RATE.value in codes(findings)
+
+
+def test_refuses_an_unannualized_range_as_well_as_a_single_rate() -> None:
+    findings = validate_target_return(
+        TargetReturnValue(
+            minimum_percent_pa=4.0,
+            maximum_percent_pa=7.0,
+            return_type=ReturnType.RANGE,
+            annualization=Annualization.UNKNOWN,
+        ),
+        quote="očekávaný výnos 4 - 7 %",
+        source_url="https://www.examplefond.cz/",
+    )
+
+    assert ValidationCode.UNKNOWN_ANNUALIZATION_FOR_ANNUAL_RATE.value in codes(findings)
+
+
+def test_keeps_a_rate_the_source_states_per_annum() -> None:
+    assert ValidationCode.UNKNOWN_ANNUALIZATION_FOR_ANNUAL_RATE.value not in codes(
+        validate_target_return(
+            TargetReturnValue(
+                value_percent_pa=7.0,
+                return_type=ReturnType.TARGET,
+                annualization=Annualization.PER_ANNUM,
+            ),
+            quote="Cílový výnos fondu činí 7 % p.a.",
+            source_url="https://www.examplefond.cz/statut.pdf",
+        )
+    )
+
+
+def test_the_annualization_of_an_annual_target_is_read_from_the_wording() -> None:
+    """
+    "Target annual return 30%" was classified as unknown.
+
+    The period stands in the name of the figure as often as it stands in
+    a p.a. suffix.
+    """
+
+    from fundscraper.field_definitions import classify_annualization
+
+    assert classify_annualization("target annual return 30%") is Annualization.PER_ANNUM
+    assert classify_annualization("rocni vynos 6 %") is Annualization.PER_ANNUM
+    assert classify_annualization("ocekavany vynos 10 % p.a.") is Annualization.PER_ANNUM
+
+    # A bare percentage stays unknown, and an annual report is not a rate.
+    assert classify_annualization("expected return 10%") is Annualization.UNKNOWN
+    assert classify_annualization("vyrocni zprava 2024 vynos 8 %") is Annualization.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# The third pass: what manual review of the delivered sample found
+# ---------------------------------------------------------------------------
+
+
+def test_a_minimum_horizon_must_not_be_delivered_as_an_exact_one() -> None:
+    """
+    CREDITAS OPPORTUNITY: "Investicni horizont: min. 3 roky".
+
+    Delivered as an exact three years, which tells an investor to plan
+    for what the fund calls the least it will accept.
+    """
+
+    findings = validate_horizon_wording(
+        InvestmentHorizonValue(recommended_years=3.0),
+        quote="fond kvalifikovaných investorů\nInvestiční horizont:\nmin. 3 roky",
+    )
+
+    assert ValidationCode.HORIZON_BOUND_LOST.value in codes(findings)
+
+
+def test_the_same_horizon_stored_as_a_minimum_keeps_passing() -> None:
+    assert not validate_horizon_wording(
+        InvestmentHorizonValue(
+            recommended_years=3.0,
+            kind=HorizonKind.MINIMUM,
+            minimum_years=3.0,
+        ),
+        quote="Investiční horizont: min. 3 roky",
+    )
+
+
+def test_an_exact_horizon_from_exact_wording_keeps_passing() -> None:
+    """The neighbouring value: no bound stated, none expected."""
+
+    assert not validate_horizon_wording(
+        InvestmentHorizonValue(recommended_years=5.0),
+        quote="Doporučený investiční horizont je 5 let.",
+    )
+
+
+def test_a_horizon_written_as_five_years_and_more_is_a_minimum() -> None:
+    findings = validate_horizon_wording(
+        InvestmentHorizonValue(recommended_years=5.0),
+        quote="investiční horizont činí 5 let a více",
+    )
+
+    assert ValidationCode.HORIZON_BOUND_LOST.value in codes(findings)
+
+
+def test_the_extractor_reads_the_bound_from_the_wording() -> None:
+    """The root cause: every horizon was built as exact."""
+
+    from fundscraper.field_definitions import classify_horizon_kind
+
+    assert classify_horizon_kind("investicni horizont: min. 3 roky") is HorizonKind.MINIMUM
+    assert classify_horizon_kind("investicni horizont cini 5 let a vice") is HorizonKind.MINIMUM
+    assert classify_horizon_kind("recommended holding period at least 7 years") is (
+        HorizonKind.MINIMUM
+    )
+    assert classify_horizon_kind("doporuceny investicni horizont 5 let") is HorizonKind.EXACT
+
+
+def test_fund_capital_must_not_be_delivered_as_equity() -> None:
+    """
+    FOND CESKYCH KORPORATNICH DLUHOPISU: "Fondovy kapital ... 52 012 tis. Kc".
+
+    The amount, the scaling and the date were all right. The metric was
+    not, and the fund's own history held the same figure, on the same
+    day, as fund capital.
+    """
+
+    findings = validate_capital_metric_wording(
+        metric_type=AumMetricType.EQUITY,
+        quote="Fondový kapitál Společnosti dosáhl k 31. 12. 2022 hodnoty 52 012 tis. Kč.",
+    )
+
+    assert ValidationCode.CAPITAL_METRIC_CONTRADICTS_EVIDENCE.value in codes(findings)
+
+
+def test_the_metrics_a_source_names_are_kept_apart() -> None:
+    """Each label keeps its own metric; equal amounts do not merge them."""
+
+    from fundscraper.field_definitions import classify_capital_metric
+
+    assert classify_capital_metric("fondovy kapital spolecnosti") is AumMetricType.FUND_CAPITAL
+    assert classify_capital_metric("cista aktiva fondu") is AumMetricType.NET_ASSETS
+    assert classify_capital_metric("cista hodnota aktiv") is AumMetricType.NAV
+    assert classify_capital_metric("vlastni kapital fondu") is AumMetricType.EQUITY
+
+
+def test_a_metric_that_agrees_with_its_evidence_keeps_passing() -> None:
+    assert not validate_capital_metric_wording(
+        metric_type=AumMetricType.FUND_CAPITAL,
+        quote="Fondový kapitál Společnosti dosáhl hodnoty 52 012 tis. Kč.",
+    )
+
+
+def test_a_generic_assets_label_does_not_contradict_the_assets_metric() -> None:
+    """Two names for the same thing are not a disagreement."""
+
+    assert not validate_capital_metric_wording(
+        metric_type=AumMetricType.FUND_AUM,
+        quote="Aktiva ve správě fondu dosáhla 530 mil. Kč.",
+    )
+
+
+def test_a_benchmark_linked_return_must_not_be_delivered_as_a_fixed_rate() -> None:
+    """
+    AVANT Finance: "zhodnoceni 2TR + 1 % p.a." delivered as 1 % p.a.
+
+    The spread alone is not a smaller version of the promise; it is a
+    different one, and the stored model cannot hold the reference rate.
+    """
+
+    findings = validate_return_wording(
+        TargetReturnValue(
+            value_percent_pa=1.0,
+            return_type=ReturnType.TARGET,
+            share_class="PIA",
+        ),
+        quote=("přednostně do růstu PIA až do výše jejich zhodnocení 2TR + 1 % p.a."),
+    )
+
+    assert ValidationCode.BENCHMARK_RETURN_AS_FIXED_RATE.value in codes(findings)
+    assert rejects(findings)
+
+
+def test_a_rate_over_pribor_is_refused_the_same_way() -> None:
+    findings = validate_return_wording(
+        TargetReturnValue(
+            value_percent_pa=3.0,
+            return_type=ReturnType.TARGET,
+        ),
+        quote="Výnos je stanoven jako PRIBOR + 3 % p.a.",
+    )
+
+    assert ValidationCode.BENCHMARK_RETURN_AS_FIXED_RATE.value in codes(findings)
+
+
+def test_a_genuinely_fixed_target_return_keeps_passing() -> None:
+    assert not validate_return_wording(
+        TargetReturnValue(
+            value_percent_pa=7.0,
+            return_type=ReturnType.TARGET,
+        ),
+        quote="Cílový výnos fondu činí 7 % p.a.",
+    )
+
+
+def test_the_extractor_refuses_to_reduce_a_formula_to_its_spread() -> None:
+    """The root cause: the window yields nothing rather than the spread."""
+
+    from fundscraper.field_definitions import states_benchmark_linked_return
+
+    assert states_benchmark_linked_return("zhodnoceni 2tr + 1 % p.a.")
+    assert states_benchmark_linked_return("vynos pribor + 3 %")
+    assert states_benchmark_linked_return("euribor + 2,5 % rocne")
+    assert states_benchmark_linked_return("inflace + 2 %")
+
+    assert not states_benchmark_linked_return("cilovy vynos 7 % p.a.")
+
+
+def test_refuses_the_net_assets_of_a_company_the_fund_acquired() -> None:
+    """
+    EBM Real Estate delivered 31 596 tis. Kc as its own assets.
+
+    The figure is the net assets of an acquired company at the
+    acquisition date, in a paragraph about Logport Development s.r.o.
+    Two things had hidden it: the report groups thousands with a full
+    stop rather than a space, and "EBM Partner a.s." counted as the fund
+    itself because a three-letter brand prefix was treated as identity.
+    """
+
+    findings = validate_capital_attribution(
+        amounts=[31_596_000.0],
+        quote=(
+            "Ve společnosti Logport Development, s.r.o. a eviduje EBM "
+            "Partner a.s. finanční investici se 49% podílem na hlasovacích "
+            "právech. Zbývající podíl ve výši 51 70.000 tis. Kč k datu "
+            "akvizice. Čistá aktiva k datu akvizice byla ve výši 31.596 "
+            "tis. Kč."
+        ),
+        fund_name="EBM Real Estate SICAV, a.s.",
+    )
+
+    assert ValidationCode.CAPITAL_OF_ANOTHER_COMPANY.value in codes(findings)
+
+
+def test_an_amount_grouped_with_full_stops_is_still_located() -> None:
+    """A Czech report groups thousands either way; the rule reads both."""
+
+    from fundscraper.extended_validation import _written_amount_forms
+
+    forms = _written_amount_forms(31_596_000.0)
+
+    assert "31 596" in forms
+    assert "31.596" in forms
+    assert "31596" in forms
+
+
+def test_a_negated_capital_label_does_not_supply_the_fund_assets() -> None:
+    """
+    "z toho neinvesticni fondovy kapital: 100 000 Kc" is a component.
+
+    Five delivered funds carried that component as their assets — VALOUR
+    100 000 CZK, VENDEAVOUR 29 950, SALUTEM 30 000, Safety Real 34 000
+    and WF Group 66 720 000 — while their real capital ran to hundreds of
+    millions. The phrase also contains the label "investicni fondovy
+    kapital", so a substring search read the negation as the thing it
+    negates.
+    """
+
+    from fundscraper.field_extraction import _money_after_label
+
+    labels = ("fondovy kapital", "cista aktiva", "hodnota majetku")
+
+    match = _money_after_label(
+        normalized=(
+            "z toho neinvesticni fondovy kapital: 100 000 kc "
+            "(z toho 100 000 kc zapisovany zakladni kapital) "
+            "z toho investicni fondovy kapital: 452 300 000 kc"
+        ),
+        labels=labels,
+    )
+
+    assert match is not None
+    assert "452 300 000" in match.group(0)
+
+
+def test_an_unqualified_capital_label_still_supplies_the_amount() -> None:
+    """The boundary: only the negated occurrence is skipped."""
+
+    from fundscraper.field_extraction import _money_after_label
+
+    match = _money_after_label(
+        normalized="fondovy kapital spolecnosti dosahl k 31.12.2022 hodnoty 52 012 tis. kc",
+        labels=("fondovy kapital",),
+    )
+
+    assert match is not None
+    assert "52 012" in match.group(0)
+
+
+def test_only_the_named_qualifiers_negate_a_capital_label() -> None:
+    from fundscraper.field_definitions import label_is_negated
+
+    text = "z toho neinvesticni fondovy kapital: 100 000 kc"
+
+    assert label_is_negated(
+        normalized=text,
+        label_start=text.index("fondovy kapital"),
+    )
+
+    plain = "celkovy fondovy kapital fondu"
+
+    assert not label_is_negated(
+        normalized=plain,
+        label_start=plain.index("fondovy kapital"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dating a value that names its period instead of its day
+# ---------------------------------------------------------------------------
+
+
+def test_the_shared_vocabulary_carries_the_inflected_capital_forms() -> None:
+    """
+    "vyse fondoveho kapitalu" is how every AVANT statute states the total.
+
+    The assets extractor used to carry its own shorter list that knew
+    only the nominative "fondovy kapital", so the headline figure was
+    invisible to it while the metric classifier read it correctly.
+    """
+
+    from fundscraper.field_definitions import FUND_CAPITAL_READING_LABELS
+
+    assert "vyse fondoveho kapitalu" in FUND_CAPITAL_READING_LABELS
+    assert "fondoveho kapitalu" in FUND_CAPITAL_READING_LABELS
+    assert "fondovy kapital" in FUND_CAPITAL_READING_LABELS
+
+    # A registered or statutory minimum capital is not this field, and
+    # neither is a balance-sheet line every company has: "vlastni
+    # kapital" in a manager's own annual report is the manager's equity.
+    assert "zapisovany zakladni kapital" not in FUND_CAPITAL_READING_LABELS
+    assert "minimalni kapital" not in FUND_CAPITAL_READING_LABELS
+    assert "vlastni kapital" not in FUND_CAPITAL_READING_LABELS
+    assert "aktiva celkem" not in FUND_CAPITAL_READING_LABELS
+
+
+def test_the_negation_guard_survives_the_wider_vocabulary() -> None:
+    """The real VALOUR window: the total, never the non-investment part."""
+
+    from fundscraper.field_definitions import FUND_CAPITAL_READING_LABELS
+    from fundscraper.field_extraction import _money_after_label
+
+    match = _money_after_label(
+        normalized=(
+            "a) zakladni kapital fondu vyse fondoveho kapitalu: 672 417 510 kc "
+            "(k poslednimu dni ucetniho obdobi) "
+            "z toho neinvesticni fondovy kapital: 100 000 kc "
+            "(z toho 100 000 kc zapisovany zakladni kapital) "
+            "z toho investicni fondovy kapital: 672 317 510 kc"
+        ),
+        labels=FUND_CAPITAL_READING_LABELS,
+    )
+
+    assert match is not None
+    assert "672 417 510" in match.group(0)
+    assert "100 000" not in match.group(0)
+
+
+def test_period_end_wording_is_recognised_and_plain_dates_are_not() -> None:
+    from fundscraper.field_definitions import refers_to_period_end
+
+    assert refers_to_period_end("vyse fondoveho kapitalu (k poslednimu dni ucetniho obdobi)")
+    assert refers_to_period_end("cista aktiva k rozvahovemu dni")
+    assert refers_to_period_end("net assets as at the balance sheet date")
+
+    # A window that writes its date needs no substitution.
+    assert not refers_to_period_end("fondovy kapital k 31.12.2022 cinil 52 012 tis. kc")
+
+    # Nothing about publication makes a value dated.
+    assert not refers_to_period_end("vyrocni zprava zverejnena dne 30.4.2025")
+
+
+def test_a_published_date_is_never_taken_as_the_value_date() -> None:
+    """
+    The substitution the fallback must refuse.
+
+    When a report was published says nothing about when its figures were
+    measured; a value dated by its own publication would be wrong by up
+    to a year. The wording gate is what prevents it: no period-end
+    phrase, no metadata date, whatever the document happens to carry.
+    """
+
+    from fundscraper.field_definitions import PERIOD_END_REFERENCE_MARKERS, refers_to_period_end
+
+    for wording in (
+        "datum zverejneni 30.4.2025",
+        "published on 30 april 2025",
+        "vyrocni zprava 2024",
+    ):
+        assert not refers_to_period_end(wording), wording
+
+    assert all("zverejn" not in marker for marker in PERIOD_END_REFERENCE_MARKERS)
+    assert all("publish" not in marker for marker in PERIOD_END_REFERENCE_MARKERS)

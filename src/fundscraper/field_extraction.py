@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Hashable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
@@ -25,17 +27,24 @@ from fundscraper.conflict_resolution import (
     resolve_group,
 )
 from fundscraper.database import ParsedDocumentRecord
+from fundscraper.document_dates import extract_document_dates
 from fundscraper.document_parser import ParsedDocument
 from fundscraper.extended_validation import fallback_extraction_metadata
 from fundscraper.field_definitions import (
+    FUND_CAPITAL_READING_LABELS,
     HOLDING_PERIOD_FROM_PATTERN,
     HOLDING_PERIOD_RANGE_PATTERN,
     HOLDING_PERIOD_TO_PATTERN,
     classify_annualization,
+    classify_capital_metric,
+    classify_horizon_kind,
     classify_return_type,
     is_negotiated_fee,
+    label_is_negated,
     months_from_period,
+    refers_to_period_end,
     share_class_code,
+    states_benchmark_linked_return,
     states_no_published_return,
 )
 from fundscraper.html_discovery import normalize_search_text
@@ -56,6 +65,7 @@ from fundscraper.output_models import (
     FeeType,
     FieldResult,
     FieldStatus,
+    HorizonKind,
     InvestmentHorizonValue,
     MinimumInvestmentKind,
     MinimumInvestmentValue,
@@ -142,6 +152,33 @@ MINIMUM_INVESTMENT_PATTERN = re.compile(
     )
     .{{0,100}}?
     (?P<amount>{NUMBER_PATTERN})
+    \s*
+    # A fund website states the subscription minimum in words -
+    # "1 mil. Kč", "3,5 mil. Kč" - as often as it writes it out. The
+    # group is named as the money pattern names it, so the same reader
+    # applies the scale.
+    (?P<multiplier>
+        tis
+        |
+        tisic
+        |
+        mil
+        |
+        milion
+        |
+        milionu
+        |
+        million
+        |
+        mld
+        |
+        miliarda
+        |
+        miliard
+        |
+        billion
+    )?
+    \.?
     \s*
     (?P<currency>czk|kc|eur|usd)
     """,
@@ -775,6 +812,15 @@ FUND_NAME_NOISE_TOKENS: Final[frozenset[str]] = frozenset(
         "otevreny",
         "uzavreny",
         "promennym",
+        # "s proměnným základním kapitálem" is the legal form of a SICAV,
+        # written out in the registered name of 29 of the canonical funds.
+        # None of its three words tells one fund from another, and a
+        # mention is only read as far as its "investiční fond" head, so a
+        # token standing behind that head can never appear in one. Left
+        # in, it made those funds unable to match their own legal name -
+        # on their own homepage the name then read as a foreign fund and
+        # every value on the page was refused.
+        "zakladnim",
         "kapitalem",
     }
 )
@@ -867,9 +913,21 @@ def extract_investment_horizon(
         if "doporucen" in window.normalized:
             score += 15
 
+        # The words immediately around the number decide whether it is
+        # the horizon or the least of it. Read from the match rather than
+        # the whole window, because a page saying "min. 100 000 Kc"
+        # elsewhere must not turn a five-year horizon into a floor.
+        kind = classify_horizon_kind(
+            window.normalized[max(match.start() - 40, 0) : match.end() + 20]
+        )
+
         candidates.append(
             Candidate(
-                value=InvestmentHorizonValue(recommended_years=years),
+                value=InvestmentHorizonValue(
+                    recommended_years=years,
+                    kind=kind,
+                    minimum_years=(years if kind is HorizonKind.MINIMUM else None),
+                ),
                 raw_value=window.quote,
                 quote=window.quote,
                 page_number=window.page_number,
@@ -914,7 +972,10 @@ def extract_minimum_investment(
             # The number is the price or value of one investment share.
             continue
 
-        amount = parse_number(match.group("amount"))
+        # The scale word is applied before the fraction guard below:
+        # "3,5 mil. Kč" is a whole number of crowns, and refusing it as a
+        # fraction would lose a minimum the site states plainly.
+        amount = parse_money_amount(match)
 
         currency = normalize_currency(match.group("currency"))
 
@@ -1057,6 +1118,14 @@ def _target_return_candidate(
     Storing them all as "target" told an investor that a fund aims at a
     number it in fact only pays before its founder is paid.
     """
+
+    # "prednostne do rustu PIA az do vyse jejich zhodnoceni 2TR + 1 %
+    # p.a." states a rate that moves with a reference rate. The stored
+    # model has nowhere to put the reference, and a delivered 1 % a year
+    # is not a weaker version of the truth but a different claim, so the
+    # window yields nothing rather than its spread.
+    if states_benchmark_linked_return(window.normalized):
+        return None
 
     return_type = classify_return_type(window.normalized)
 
@@ -1459,16 +1528,9 @@ def extract_aum(
 ) -> FieldResult[AssetsUnderManagementValue]:
     candidates: list[Candidate[AssetsUnderManagementValue]] = []
 
-    aum_keywords = (
-        "majetek fondu",
-        "hodnota majetku",
-        "cista aktiva",
-        "fondovy kapital",
-        "net assets",
-        "fund assets",
-        "net asset value",
-        "assets under management",
-    )
+    # The shared fund-level vocabulary, not a second private list. It
+    # carries the inflected forms a Czech report actually uses.
+    aum_keywords = FUND_CAPITAL_READING_LABELS
 
     manager_keywords = (
         "investicni spolecnost spravuje",
@@ -1490,6 +1552,9 @@ def extract_aum(
             continue
 
         as_of = extract_date(window.normalized)
+
+        if as_of is None:
+            as_of = _period_end_date(window)
 
         if as_of is None:
             continue
@@ -1552,12 +1617,16 @@ def extract_aum(
             amount=value.amount,
             currency=value.currency,
         ),
-        # The assets of one date and the assets of another are both true.
-        # Only two figures of the same metric on the same day in the same
-        # currency can contradict each other.
+        # This field is the assets of the fund *now*, so two readings of
+        # the same metric compete however far apart their dates are, and
+        # the ranking ladder prefers the newer one. Keeping the date in
+        # the key made every date its own uncontested winner, which is
+        # how a 2023 net asset value was delivered as the current assets
+        # of a fund whose own history already held a 2025 one. Every
+        # dated observation still survives in ``aum_history``, which
+        # groups by date on purpose.
         conflict_key=lambda value: (
             value.metric_type.value,
-            value.as_of.isoformat(),
             value.currency,
         ),
         field="assets_under_management",
@@ -1714,10 +1783,16 @@ def _parse_fee_tiers(
 
     used: set[int] = set()
 
+    clauses = _clause_spans(normalized)
+
     for start, from_months, to_months in _holding_periods(normalized):
-        rate = _rate_after(
+        rate = _rate_of_period(
             percentages=percentages,
             start=start,
+            clause=_clause_of(
+                clauses=clauses,
+                offset=start,
+            ),
             used=used,
         )
 
@@ -1820,23 +1895,97 @@ def _holding_periods(
     return sorted(periods)
 
 
-def _rate_after(
+def _clause_spans(
+    normalized: str,
+) -> tuple[tuple[int, int], ...]:
+    """
+    Return the comma-separated clauses of one fee line.
+
+    A fee schedule states one period and its rate per clause, in either
+    order: "do 1 roku - 10 %, po 1 roce 0 %" and "0 % po 3 letech, 5 % do
+    3 let" both do. The clause is what keeps a period from taking the
+    rate of its neighbour.
+    """
+
+    spans: list[tuple[int, int]] = []
+
+    start = 0
+
+    for index, character in enumerate(normalized):
+        if character in ",;":
+            spans.append(
+                (
+                    start,
+                    index,
+                )
+            )
+
+            start = index + 1
+
+    spans.append(
+        (
+            start,
+            len(normalized),
+        )
+    )
+
+    return tuple(spans)
+
+
+def _clause_of(
+    *,
+    clauses: tuple[tuple[int, int], ...],
+    offset: int,
+) -> tuple[int, int]:
+    """Return the clause an offset falls in."""
+
+    for span in clauses:
+        if span[0] <= offset <= span[1]:
+            return span
+
+    return (
+        0,
+        offset,
+    )
+
+
+def _rate_of_period(
     *,
     percentages: list[tuple[int, float]],
     start: int,
+    clause: tuple[int, int],
     used: set[int],
 ) -> float | None:
-    """Return the first unused percentage stated after a holding period."""
+    """
+    Return the percentage that belongs to one holding period.
 
-    for offset, value in percentages:
-        if offset < start or offset in used:
-            continue
+    Only a percentage of the same clause qualifies. Within it the one
+    stated after the period is preferred, because that is how a fee table
+    is usually written; a clause that puts the rate first - "0 % po 3
+    letech" - is read backwards rather than reaching into the next
+    clause, which published the schedule inverted.
+    """
 
-        used.add(offset)
+    clause_start, clause_end = clause
 
-        return value
+    available = [
+        (offset, value)
+        for offset, value in percentages
+        if clause_start <= offset <= clause_end and offset not in used
+    ]
 
-    return None
+    following = [item for item in available if item[0] >= start]
+
+    preceding = [item for item in available if item[0] < start]
+
+    chosen = following[0] if following else (preceding[-1] if preceding else None)
+
+    if chosen is None:
+        return None
+
+    used.add(chosen[0])
+
+    return chosen[1]
 
 
 def _fee_frequency(
@@ -1854,17 +2003,54 @@ def _fee_frequency(
     return FeeFrequency.ANNUAL
 
 
+def _period_end_date(
+    window: TextWindow,
+) -> date | None:
+    """
+    Date a value that names its period instead of its day.
+
+    Only one substitution is allowed and only when the text asks for it:
+    the window has to say the figure is stated at the end of the
+    accounting period, and the document has to state when that period
+    ended. A publication date is never used — when a report is published
+    says nothing about when its figures were measured, and a value dated
+    by its own publication would be wrong by up to a year.
+    """
+
+    if not refers_to_period_end(window.normalized):
+        return None
+
+    dates = extract_document_dates(
+        text=window.document.document.full_text,
+        url=window.document.record.url or "",
+    )
+
+    period_end = dates.reporting_period_end
+
+    if period_end is None:
+        return None
+
+    return period_end.value
+
+
 def _detect_aum_metric(
     normalized: str,
 ) -> AumMetricType:
-    if "net asset value" in normalized or " nav " in f" {normalized} ":
-        return AumMetricType.NAV
+    """
+    Name the capital figure a window states, using the shared labels.
 
-    if "cista aktiva" in normalized or "net assets" in normalized:
-        return AumMetricType.NET_ASSETS
+    This used to carry its own short ladder, which disagreed with
+    ``classify_capital_metric`` on the one label they both knew: it read
+    "fondovy kapital" as equity where the shared table reads it as fund
+    capital. One delivered output therefore reported 52 012 tis. Kc as
+    the equity of a fund whose own history recorded the same figure, on
+    the same day, as its fund capital.
+    """
 
-    if "fondovy kapital" in normalized:
-        return AumMetricType.EQUITY
+    metric = classify_capital_metric(normalized)
+
+    if metric is not None:
+        return metric
 
     if "aktiva" in normalized or "fund assets" in normalized:
         return AumMetricType.ASSETS_TOTAL
@@ -1948,6 +2134,18 @@ def _money_after_label(
 
         while start >= 0:
             label_end = start + len(label)
+
+            # "z toho neinvesticni fondovy kapital: 100 000 Kc" names a
+            # component of the capital, not the capital. Skipping the
+            # occurrence lets the same window's "investicni fondovy
+            # kapital" supply the real figure.
+            if label_is_negated(
+                normalized=normalized,
+                label_start=start,
+            ):
+                start = normalized.find(label, start + 1)
+
+                continue
 
             money_match = MONEY_PATTERN.search(
                 normalized,
@@ -2675,6 +2873,134 @@ def candidate_or_missing[ValueT](
     )
 
 
+@dataclass(frozen=True, slots=True)
+class IsinIdentity:
+    """Who an official ISIN belongs to, and at which scope."""
+
+    fund_name: str
+    scope: SourceScope
+    subfund_name: str | None = None
+    share_class_name: str | None = None
+
+
+# ISIN -> owner. Built from the official CNB register, so an entry is an
+# exact statement of ownership, not a guess.
+type IsinIdentityIndex = Mapping[str, IsinIdentity]
+
+
+# The index is supplied for a whole extraction run rather than threaded
+# through every field function, because identity is a property of the run
+# and not of one field. Unset, it is None, and every identity decision is
+# taken exactly as it was before the index existed.
+_ISIN_IDENTITY: Final[ContextVar[IsinIdentityIndex | None]] = ContextVar(
+    "fundscraper_isin_identity",
+    default=None,
+)
+
+
+@contextmanager
+def official_isin_identity(
+    index: IsinIdentityIndex | None,
+) -> Iterator[None]:
+    """
+    Make an official ISIN index available to identity decisions.
+
+    Entering with None - or with an empty index - changes nothing, so a
+    caller that has no register behaves exactly as before.
+    """
+
+    token = _ISIN_IDENTITY.set(index or None)
+
+    try:
+        yield
+    finally:
+        _ISIN_IDENTITY.reset(token)
+
+
+def active_isin_identity() -> IsinIdentityIndex | None:
+    """Return the index of the current extraction run, if one was set."""
+
+    return _ISIN_IDENTITY.get()
+
+
+# An ISIN as it is printed in a document: two country letters, nine
+# alphanumerics and a check digit.
+_ISIN_IN_TEXT: Final = re.compile(r"\b([A-Z]{2}[0-9A-Z]{9}[0-9])\b")
+
+# Only these scopes may be asserted by an ISIN. An ISIN identifies a
+# security, so it can prove the fund, the subfund or the share class it
+# was issued to - never a manager-level or generic document.
+_ISIN_ASSERTABLE: Final[frozenset[SourceScope]] = frozenset(
+    {
+        SourceScope.EXACT_FUND,
+        SourceScope.SUBFUND,
+        SourceScope.SHARE_CLASS,
+    }
+)
+
+
+def official_isin_scope(
+    *,
+    fund_name: str,
+    source_url: str,
+    source_title: str | None,
+    document_text: str,
+    isin_identity: IsinIdentityIndex | None,
+) -> SourceScope | None:
+    """
+    Resolve identity from an official ISIN printed in the source.
+
+    Returns the scope the ISIN was issued at when the document carries an
+    official ISIN of this fund, and None when the question cannot be
+    settled that way - no index, no ISIN, an unknown ISIN, or an ISIN
+    that belongs to a different fund. In every one of those cases the
+    caller falls back to name-based identity, unchanged.
+
+    This answers only "whose source is this". It says nothing about what
+    a value inside the source means: a per-share value does not become
+    fund assets, and a share-class fee does not become a fund-level fee,
+    merely because the owner is certain.
+    """
+
+    index = isin_identity if isin_identity is not None else _ISIN_IDENTITY.get()
+
+    if not index:
+        return None
+
+    haystack = " ".join(
+        part for part in (source_title or "", source_url, document_text) if part
+    ).upper()
+
+    if "CZ" not in haystack and "LU" not in haystack and "IE" not in haystack:
+        return None
+
+    mine: SourceScope | None = None
+
+    for token in set(_ISIN_IN_TEXT.findall(haystack)):
+        owner = index.get(token)
+
+        if owner is None:
+            continue
+
+        if owner.fund_name != fund_name:
+            # The document carries the ISIN of a different fund. That is
+            # evidence against this fund, so nothing is asserted here and
+            # the name-based rules decide.
+            return None
+
+        if owner.scope not in _ISIN_ASSERTABLE:
+            continue
+
+        # Several classes of one fund can appear in the same document.
+        # The narrowest scope wins, so a share-class KID stays a
+        # share-class source even when the fund's own ISIN is printed
+        # next to it.
+        if mine is None or _scope_rank(owner.scope) < _scope_rank(mine):
+            mine = owner.scope
+
+    return mine
+
+
 def _scope_verdict[ValueT](
     *,
     candidate: Candidate[ValueT],
@@ -2704,6 +3030,7 @@ def classify_source_scope(
     quote: str,
     value_offset: int | None = None,
     document: ExtractionDocument | None = None,
+    isin_identity: IsinIdentityIndex | None = None,
 ) -> SourceScope:
     """
     Determine whether a source really belongs to the requested fund.
@@ -2712,12 +3039,29 @@ def classify_source_scope(
     of the document, which is where the legal fund name appears. When a
     document names some fund but not this one, it belongs to another
     fund and must never be used.
+
+    An official ISIN, when one is supplied through `isin_identity`, is
+    stronger evidence than any of that: a subfund KID states the ISIN of
+    the class it prices but rarely repeats the parent fund's full legal
+    name, so requiring the name as well loses a source whose owner is
+    already certain.
     """
 
     normalized_quote = normalize_search_text(quote)
 
     if any(keyword in normalized_quote for keyword in SCOPE_MISMATCH_KEYWORDS):
         return SourceScope.MANAGER
+
+    official_scope = official_isin_scope(
+        fund_name=fund_name,
+        source_url=source_url,
+        source_title=source_title,
+        document_text=document_text,
+        isin_identity=isin_identity,
+    )
+
+    if official_scope is not None:
+        return official_scope
 
     fund_tokens = fund_identity_tokens(fund_name)
 
@@ -2741,6 +3085,13 @@ def classify_source_scope(
     else:
         normalized_document = normalize_search_text(document_text)
 
+    # A document filed under an address that spells out this fund's name
+    # belongs to it, even where the page also presents its neighbours.
+    owns_the_page = url_identifies_fund(
+        fund_tokens=fund_tokens,
+        source_url=source_url,
+    )
+
     if names_another_fund(
         text=normalized_document,
         fund_tokens=fund_tokens,
@@ -2754,10 +3105,7 @@ def classify_source_scope(
             identity_text=identity_text,
             normalized_quote=normalized_quote,
             value_offset=value_offset,
-            owns_the_page=url_identifies_fund(
-                fund_tokens=fund_tokens,
-                source_url=source_url,
-            ),
+            owns_the_page=owns_the_page,
         )
 
     confirms_fund, names_some_fund = _named_fund_matches(

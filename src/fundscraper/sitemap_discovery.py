@@ -45,6 +45,27 @@ DEFAULT_SITEMAP_PATHS: Final[tuple[str, ...]] = (
 ROBOTS_PATH: Final = "/robots.txt"
 
 
+def is_sitemap_address(
+    url: str,
+) -> bool:
+    """
+    Return whether an address is a sitemap or a robots file.
+
+    Both are discovery artefacts: they say where a site keeps its pages,
+    and they are read by the discovery stage itself. A site that names
+    them "oznameni-sitemap.xml" or "wp-sitemap.xml" means the same thing
+    as one that uses the conventional path, so the name is matched rather
+    than a fixed list.
+    """
+
+    path = urlsplit(url).path.casefold()
+
+    if path == ROBOTS_PATH:
+        return True
+
+    return path.endswith(".xml") and "sitemap" in path
+
+
 # A sitemap index may point at further indexes. Two levels reach every
 # real fund site while keeping a malformed loop bounded.
 MAXIMUM_SITEMAP_DEPTH: Final = 2

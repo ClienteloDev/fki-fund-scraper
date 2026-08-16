@@ -106,7 +106,12 @@ def test_extracts_all_supported_fields() -> None:
 
     assert result.assets_under_management.value.amount == 2_500_000_000
 
-    assert result.assets_under_management.value.metric_type is AumMetricType.FUND_AUM
+    # "Hodnota majetku fondu" is a labelled total, so the shared capital
+    # vocabulary names it. It used to fall through to the unclassified
+    # fund_aum because the assets extractor carried its own shorter
+    # ladder; both are fund-level and deliverable, and the named one
+    # tells a reader which line of the statement was read.
+    assert result.assets_under_management.value.metric_type is AumMetricType.ASSETS_TOTAL
 
     assert result.assets_under_management.value.as_of.isoformat() == "2025-12-31"
 

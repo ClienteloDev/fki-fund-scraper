@@ -29,6 +29,7 @@ from urllib.parse import unquote, urlsplit
 
 from selectolax.lexbor import LexborHTMLParser
 
+from fundscraper.conflict_resolution import MANAGER_HOST_FRAGMENTS
 from fundscraper.database import (
     DatabaseError,
     DiscoveryLogRecord,
@@ -60,6 +61,12 @@ from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_domain, canonical_url
 from fundscraper.output_models import DocumentType
 from fundscraper.output_service import stable_fund_id
+from fundscraper.run_diagnostics import (
+    Diagnostic,
+    DiagnosticLevel,
+    classify_fetch_failure,
+    escalate_repeated_server_errors,
+)
 from fundscraper.site_crawler import anchor_text as read_anchor_text
 from fundscraper.sitemap_discovery import (
     MAXIMUM_SITEMAP_DEPTH,
@@ -67,6 +74,7 @@ from fundscraper.sitemap_discovery import (
     candidate_sitemap_urls,
     filter_sitemap_entries,
     is_allowed,
+    is_sitemap_address,
     parse_sitemap,
     robots_disallowed_paths,
     robots_sitemap_urls,
@@ -79,6 +87,7 @@ REJECTED_LOW_PRIORITY = "low_priority"
 REJECTED_UNRELATED = "unrelated_page"
 REJECTED_ROBOTS = "disallowed_by_robots"
 REJECTED_OTHER_FUND = "belongs_to_another_fund"
+REJECTED_OTHER_FUND_DOCUMENT = "other_fund_document"
 REJECTED_DUPLICATE = "duplicate_document"
 REJECTED_BUDGET = "crawl_budget_exhausted"
 REJECTED_FETCH_FAILED = "fetch_failed"
@@ -205,6 +214,27 @@ REQUIRED_DOCUMENT_GROUPS: tuple[
 )
 
 
+# The document types a fund publishes about itself. One of them found on
+# a site that runs many funds, with nothing naming this fund, is another
+# fund's document: a key information document and a statute always belong
+# to exactly one fund. A price list, an investor notice or a corporate
+# page can legitimately cover every fund a manager runs, so they are not
+# in this set and are never refused by the identity rule.
+FUND_SPECIFIC_DOCUMENT_TYPES: frozenset[DocumentType] = frozenset(
+    {
+        DocumentType.PRIIPS_KID,
+        DocumentType.STATUTE,
+        DocumentType.SUBFUND_STATUTE,
+        DocumentType.MEMORANDUM,
+        DocumentType.PROSPECTUS,
+        DocumentType.FACTSHEET,
+        DocumentType.ANNUAL_REPORT,
+        DocumentType.HALF_YEAR_REPORT,
+        DocumentType.FINANCIAL_STATEMENTS,
+    }
+)
+
+
 # Puts one URL into the crawl frontier at the given priority.
 type Enqueue = Callable[..., None]
 
@@ -252,6 +282,11 @@ class OfficialDiscoveryResult:
     entries: tuple[DiscoveryEntry, ...]
     metrics: OfficialDiscoveryMetrics
     warnings: tuple[str, ...]
+
+    # Everything the stage recorded, with an expected miss told apart
+    # from something that went wrong. ``warnings`` keeps only the lines
+    # that are worth a reader's attention.
+    diagnostics: tuple[Diagnostic, ...] = ()
 
     # The document types this pass was sent out to find, if any. They
     # count towards sufficiency next to the groups every fund needs.
@@ -345,13 +380,21 @@ async def discover_official_sources(
             entries=(),
             metrics=OfficialDiscoveryMetrics(),
             warnings=("no official website is known for this fund",),
+            diagnostics=(
+                Diagnostic(
+                    level=DiagnosticLevel.WARNING,
+                    stage="discovery",
+                    code="no_official_website",
+                    message=("no official website is known for this fund"),
+                ),
+            ),
         )
 
     official_domain = canonical_domain(fund.web)
 
     entries: list[DiscoveryEntry] = []
 
-    warnings: list[str] = []
+    diagnostics: list[Diagnostic] = []
 
     documents: dict[str, DiscoveredLink] = {}
 
@@ -456,6 +499,8 @@ async def discover_official_sources(
 
     disallowed: tuple[str, ...] = ()
 
+    guessed_addresses: set[str] = set()
+
     robots_address = robots_url(fund.web)
 
     if robots_address is not None:
@@ -463,7 +508,8 @@ async def discover_official_sources(
             fetcher=fetcher,
             url=robots_address,
             force=force,
-            warnings=warnings,
+            diagnostics=diagnostics,
+            guessed=True,
         )
 
         if robots_result is not None:
@@ -482,6 +528,10 @@ async def discover_official_sources(
                 )
 
     for sitemap_address in candidate_sitemap_urls(fund.web):
+        # Invented, not linked. A site that does not publish it owes
+        # nobody an explanation, so its 404 is an expected miss.
+        guessed_addresses.add(canonical_url(sitemap_address))
+
         enqueue(
             url=sitemap_address,
             score=190,
@@ -533,7 +583,8 @@ async def discover_official_sources(
             fetcher=fetcher,
             url=url,
             force=force,
-            warnings=warnings,
+            diagnostics=diagnostics,
+            guessed=canonical_url(url) in guessed_addresses,
         )
 
         if fetched is None:
@@ -668,8 +719,16 @@ async def discover_official_sources(
         )
     )
 
+    # A sitemap has already been read by this stage. Handing it to the
+    # crawler as a page made it fetch the file again, store it as a
+    # source and send it to the document parser: eleven per cent of all
+    # parsed documents in a full run were sitemaps, one of them 140 000
+    # characters wide and parsed once per fund of a shared manager
+    # domain.
     navigation_urls = tuple(
-        entry.url for entry in entries if entry.accepted and not entry.is_document
+        entry.url
+        for entry in entries
+        if entry.accepted and not entry.is_document and not is_sitemap_address(entry.url)
     )
 
     metrics = OfficialDiscoveryMetrics(
@@ -684,14 +743,24 @@ async def discover_official_sources(
         method_counts=dict(sorted(method_counts.items())),
     )
 
+    # One document linked from both the Czech and the English version of
+    # a page is seen twice. The second sighting is a duplicate, but the
+    # discovery log is keyed by URL and upserts, so leaving both in made
+    # the later "duplicate, rejected" row overwrite the earlier accepted
+    # one — a factsheet that was found and downloaded was recorded as
+    # refused. The entries are collapsed before anything reads them.
+    entries = _collapse_entries(entries)
+
     if database_path is not None:
         _persist(
             database_path=database_path,
             fund_id=fund_id,
             entries=entries,
             run_id=run_id,
-            warnings=warnings,
+            diagnostics=diagnostics,
         )
+
+    recorded = escalate_repeated_server_errors(diagnostics)
 
     return OfficialDiscoveryResult(
         fund_id=fund_id,
@@ -701,9 +770,38 @@ async def discover_official_sources(
         documents=ordered_documents,
         entries=tuple(entries),
         metrics=metrics,
-        warnings=tuple(warnings),
+        # An expected miss is not worth a reader's attention, so it stays
+        # out of the warning lines while remaining counted in diagnostics.
+        warnings=tuple(
+            item.rendered() for item in recorded if item.level is not DiagnosticLevel.EXPECTED_MISS
+        ),
+        diagnostics=tuple(recorded),
         wanted_document_types=wanted_document_types,
     )
+
+
+def _collapse_entries(
+    entries: list[DiscoveryEntry],
+) -> list[DiscoveryEntry]:
+    """
+    Keep one entry per address, the one that says what became of it.
+
+    An address that was accepted once was accepted, however many later
+    sightings were skipped as duplicates. Reporting the last sighting
+    instead of the decisive one understated what discovery found.
+    """
+
+    best: dict[str, DiscoveryEntry] = {}
+
+    for entry in entries:
+        key = canonical_url(entry.url)
+
+        current = best.get(key)
+
+        if current is None or (entry.accepted and not current.accepted):
+            best[key] = entry
+
+    return list(best.values())
 
 
 def _covers_what_is_needed(
@@ -894,16 +992,21 @@ def _consider_document(
 
     key = canonical_url(link_url)
 
-    scope = _scope_of(
+    decision = _scope_of(
         fund=fund,
         link_url=link_url,
         page_url=page_url,
         page_title=page_title,
         anchor_text=anchor_text,
         names_the_fund=names_the_fund,
+        document_type=document_type,
     )
 
+    scope = decision.scope
+
     if scope is None:
+        # Refused before the download, so the bytes are never fetched and
+        # the document never reaches the parser.
         entries.append(
             _entry(
                 url=link_url,
@@ -911,7 +1014,7 @@ def _consider_document(
                 discovered_from=page_url,
                 score=score_value,
                 accepted=False,
-                rejection_reason=REJECTED_OTHER_FUND,
+                rejection_reason=(decision.rejection_reason or REJECTED_OTHER_FUND),
                 document_type=document_type,
                 is_document=True,
                 title=anchor_text or None,
@@ -1011,6 +1114,31 @@ def _consider_document(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ScopeDecision:
+    """How one document was attributed, or why it could not be."""
+
+    scope: str | None = None
+    rejection_reason: str | None = None
+
+
+def _hosts_many_funds(
+    fund: FundInput,
+) -> bool:
+    """
+    Return whether the official address is the site of a fund manager.
+
+    A manager runs many funds from one host, so the absence of this
+    fund's name on a document there is not neutral. The hosts are the
+    ones the ranking rules already know, so there is one list rather
+    than two.
+    """
+
+    host = canonical_domain(fund.web or "")
+
+    return any(fragment in host for fragment in MANAGER_HOST_FRAGMENTS)
+
+
 def _scope_of(
     *,
     fund: FundInput,
@@ -1019,9 +1147,10 @@ def _scope_of(
     page_title: str,
     anchor_text: str,
     names_the_fund: bool,
-) -> str | None:
+    document_type: DocumentType = DocumentType.OTHER,
+) -> ScopeDecision:
     """
-    Return how a document was attributed, or None when it cannot be.
+    Return how a document was attributed, or why it cannot be.
 
     A fund with its own website owns everything on it. A fund hosted on
     the website of its manager owns only what its own section says, which
@@ -1034,7 +1163,7 @@ def _scope_of(
     page_domain = canonical_domain(page_url)
 
     if page_domain != official_domain:
-        return None
+        return ScopeDecision(rejection_reason=REJECTED_OFF_DOMAIN)
 
     if _link_names_another_fund(
         fund=fund,
@@ -1044,10 +1173,10 @@ def _scope_of(
         # The page belongs to this fund but the link does not. A manager
         # puts the statute of a neighbouring fund on a fund page often
         # enough that inheriting the attribution of the page is wrong.
-        return None
+        return ScopeDecision(rejection_reason=REJECTED_OTHER_FUND)
 
     if names_the_fund:
-        return SCOPE_EXACT_FUND
+        return ScopeDecision(scope=SCOPE_EXACT_FUND)
 
     page_signals = PrioritySignals(
         url=page_url,
@@ -1057,12 +1186,27 @@ def _scope_of(
     )
 
     if score_link(page_signals).names_the_fund:
-        return SCOPE_FUND_SECTION
+        return ScopeDecision(scope=SCOPE_FUND_SECTION)
 
-    if _is_single_fund_site(fund):
-        return SCOPE_OWN_DOMAIN
+    if not _is_single_fund_site(fund):
+        return ScopeDecision(rejection_reason=REJECTED_OTHER_FUND)
 
-    return None
+    if _hosts_many_funds(fund) and document_type in FUND_SPECIFIC_DOCUMENT_TYPES:
+        # The address of this fund is the bare site of a manager that
+        # runs many of them, so "own domain" is not the fund's own: the
+        # host is shared with every other fund the manager administers.
+        # A key information document or a statute belongs to exactly one
+        # fund, and nothing here names this one, so it is somebody
+        # else's until it says otherwise. Downloading these cost the
+        # first pass more than half of its parsing time and produced
+        # values the scope rules then threw away.
+        #
+        # A price list or an investor notice is not refused: a manager
+        # publishes one that covers every fund it runs, and the absence
+        # of this fund's name says nothing against it.
+        return ScopeDecision(rejection_reason=REJECTED_OTHER_FUND_DOCUMENT)
+
+    return ScopeDecision(scope=SCOPE_OWN_DOMAIN)
 
 
 def _link_names_another_fund(
@@ -1376,15 +1520,37 @@ async def _try_fetch(
     fetcher: HttpFetcher,
     url: str,
     force: bool,
-    warnings: list[str],
+    diagnostics: list[Diagnostic],
+    guessed: bool = False,
 ) -> FetchResult | None:
+    """
+    Fetch one address, recording what happened when it does not answer.
+
+    ``guessed`` says the address was invented by discovery rather than
+    followed from a link, which is what makes a 404 an expected answer
+    instead of a problem.
+    """
+
     try:
         return await fetcher.fetch(
             url,
             force=force,
         )
     except FetchError as exc:
-        warnings.append(f"discovery: {url}: {exc.code}: {exc}")
+        diagnostics.append(
+            Diagnostic(
+                level=classify_fetch_failure(
+                    url=url,
+                    code=exc.code,
+                    status_code=getattr(exc, "status_code", None),
+                    guessed=guessed,
+                ),
+                stage="discovery",
+                code=exc.code,
+                message=str(exc),
+                url=url,
+            )
+        )
 
         return None
 
@@ -1395,7 +1561,7 @@ def _persist(
     fund_id: str,
     entries: list[DiscoveryEntry],
     run_id: str,
-    warnings: list[str],
+    diagnostics: list[Diagnostic],
 ) -> None:
     for entry in entries:
         try:
@@ -1419,6 +1585,14 @@ def _persist(
                 ),
             )
         except DatabaseError as exc:
-            warnings.append(f"discovery log: {entry.url}: {exc}")
+            diagnostics.append(
+                Diagnostic(
+                    level=DiagnosticLevel.WARNING,
+                    stage="discovery log",
+                    code="database_error",
+                    message=str(exc),
+                    url=entry.url,
+                )
+            )
 
             return

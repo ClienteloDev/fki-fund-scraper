@@ -669,3 +669,234 @@ def test_assets_with_a_unit_in_the_evidence_are_a_selection_problem() -> None:
     )
 
     assert "thousands_unit_not_applied" in reason_codes(outcome)
+
+
+# ---------------------------------------------------------------------------
+# Zero fees and extreme fees
+# ---------------------------------------------------------------------------
+#
+# Thirty-one delivered fee items carried a fixed amount of zero and no
+# rate at all. None of them was ever measured against its source line,
+# because the zero-fee check only ran for a zero rate.
+
+
+def fee_payload(
+    item: dict[str, Any],
+    *,
+    url: str = "https://www.examplefond.cz/kid.pdf",
+) -> dict[str, Any]:
+    return field_payload(
+        {"items": [item]},
+        url=url,
+    )
+
+
+def test_a_zero_amount_fee_is_checked_against_its_source_line() -> None:
+    """
+    ARETE INDUSTRIAL delivered a zero exit fee from a sentence about credit.
+
+    The stored line never mentions an exit fee or a zero, so nothing in
+    the evidence supports the value.
+    """
+
+    outcome = audit_one(
+        "fees",
+        fee_payload(
+            {
+                "type": "exit",
+                "rate_percent": None,
+                "fixed_amount": 0.0,
+                "currency": "CZK",
+                "basis": (
+                    "In the monitored accounting period, the Fund "
+                    "registered Credit account 3,542 717 reward to the "
+                    "management company"
+                ),
+            }
+        ),
+    )
+
+    assert outcome.status is AuditStatus.SUSPICIOUS
+    assert "zero_fee_not_supported_by_source" in reason_codes(outcome)
+
+
+def test_a_zero_stated_by_a_key_information_document_keeps_passing() -> None:
+    """
+    "U tohoto produktu se neplati zadny vykonnostni poplatek. 0 CZK".
+
+    Nineteen funds deliver this exact wording. It states a real zero fee
+    for the fee type it names, and the rule must leave it alone.
+    """
+
+    outcome = audit_one(
+        "fees",
+        fee_payload(
+            {
+                "type": "performance",
+                "rate_percent": None,
+                "fixed_amount": 0.0,
+                "currency": "CZK",
+                "basis": (
+                    "Výkonnostní poplatky U tohoto produktu se neplatí "
+                    "žádný výkonnostní poplatek. 0 CZK"
+                ),
+            }
+        ),
+    )
+
+    assert "zero_fee_not_supported_by_source" not in reason_codes(outcome)
+    assert "zero_fee_of_another_fee_type" not in reason_codes(outcome)
+
+
+def test_a_zero_read_from_the_row_of_a_different_fee_is_not_valid() -> None:
+    """
+    ATERNUS delivered a zero performance fee from its entry-cost row.
+
+    One captured row of a cost table gave every fee type the same zero.
+    The row states a zero, so the older check passes it; what it never
+    states is a performance fee.
+    """
+
+    outcome = audit_one(
+        "fees",
+        fee_payload(
+            {
+                "type": "performance",
+                "rate_percent": None,
+                "fixed_amount": 0.0,
+                "currency": "EUR",
+                "basis": (
+                    "Náklady na vstup U tohoto produktu se neplatí žádný vstupní poplatek 0 EUR"
+                ),
+            }
+        ),
+    )
+
+    assert outcome.status is AuditStatus.SUSPICIOUS
+    assert "zero_fee_of_another_fee_type" in reason_codes(outcome)
+
+
+def test_the_entry_fee_of_that_same_row_keeps_passing() -> None:
+    """The other side of the rule: the row does state its own fee."""
+
+    outcome = audit_one(
+        "fees",
+        fee_payload(
+            {
+                "type": "entry",
+                "rate_percent": None,
+                "fixed_amount": 0.0,
+                "currency": "EUR",
+                "basis": (
+                    "Náklady na vstup U tohoto produktu se neplatí žádný vstupní poplatek 0 EUR"
+                ),
+            }
+        ),
+    )
+
+    assert "zero_fee_of_another_fee_type" not in reason_codes(outcome)
+    assert "zero_fee_not_supported_by_source" not in reason_codes(outcome)
+
+
+def test_an_extreme_fee_the_source_proves_keeps_passing() -> None:
+    """
+    A 50 per cent performance fee above an 8 per cent hurdle is real.
+
+    Magnitude alone never refuses a fee: the source names the fee, states
+    the rate and states what it is charged on.
+    """
+
+    outcome = audit_one(
+        "fees",
+        fee_payload(
+            {
+                "type": "performance",
+                "rate_percent": 50.0,
+                "basis": "Výkonnostní poplatek 50 % z výnosu nad zhodnocení 8 % p.a.",
+            },
+            url="https://www.examplefond.cz/statut.pdf",
+        ),
+    )
+
+    assert outcome.status is AuditStatus.VALID
+
+
+def test_an_extreme_fee_whose_evidence_does_not_state_it_is_not_valid() -> None:
+    """
+    A 100 per cent exit fee read from a sentence that states no fee.
+
+    One delivered fund carried an exit fee of the entire investment. The
+    rate never appears in the stored line.
+    """
+
+    outcome = audit_one(
+        "fees",
+        fee_payload(
+            {
+                "type": "exit",
+                "rate_percent": 100.0,
+                "basis": (
+                    "kalendářní rok se investoři mohou seznámit s "
+                    "výsledky hospodaření fondu a s výší poplatku"
+                ),
+            },
+            url="https://www.examplefond.cz/statut.pdf",
+        ),
+    )
+
+    assert outcome.status is AuditStatus.SUSPICIOUS
+    assert "value_not_present_in_evidence" in reason_codes(outcome)
+
+
+def test_a_percentage_naming_who_receives_the_fee_is_not_the_fee_rate() -> None:
+    """
+    The real 100 per cent exit fee of 1. fond reverznich hypotek SICAV.
+
+    "Vystupni poplatek (srazka) je 100 % prijmem do fondu" says the whole
+    fee goes to the fund. The older check only recognised the clause when
+    it stood in front of the number, and here the number splits it.
+    """
+
+    outcome = audit_one(
+        "fees",
+        fee_payload(
+            {
+                "type": "exit",
+                "rate_percent": 100.0,
+                "basis": (
+                    "kalendářní rok se investoři mohou seznámit na "
+                    "Výstupní poplatek (srážka) je 100 % příjmem do"
+                ),
+            },
+            url="https://www.examplefond.cz/statut.pdf",
+        ),
+    )
+
+    assert outcome.status is AuditStatus.SUSPICIOUS
+    assert "percentage_describes_income_share" in reason_codes(outcome)
+
+
+def test_a_real_fee_that_merely_names_its_recipient_keeps_passing() -> None:
+    """
+    "Vykonnostni odmena cini 20 % ... je prijmem Fondu" states a real fee.
+
+    The clause follows the rate at a distance instead of governing it,
+    which is the other side of the rule above.
+    """
+
+    outcome = audit_one(
+        "fees",
+        fee_payload(
+            {
+                "type": "performance",
+                "rate_percent": 20.0,
+                "basis": (
+                    "Výkonnostní odměna činí 20 % ze zhodnocení nad "
+                    "stanovenou hranici a je příjmem Fondu."
+                ),
+            },
+            url="https://www.examplefond.cz/statut.pdf",
+        ),
+    )
+
+    assert "percentage_describes_income_share" not in reason_codes(outcome)

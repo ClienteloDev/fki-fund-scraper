@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
+from typing import Final
 
 from fundscraper.crawl_planning import (
     CrawlBudget,
@@ -63,6 +64,38 @@ from fundscraper.output_service import (
     stable_fund_id,
     write_output,
 )
+from fundscraper.run_diagnostics import (
+    Diagnostic,
+    DiagnosticLevel,
+    classify_fetch_failure,
+    summarize,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class StageTimings:
+    """How long each stage of one fund took, in seconds."""
+
+    discovery: float = 0.0
+    crawl: float = 0.0
+    parse: float = 0.0
+    extract: float = 0.0
+
+    @property
+    def total(self) -> float:
+        return round(
+            self.discovery + self.crawl + self.parse + self.extract,
+            3,
+        )
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "discovery": self.discovery,
+            "crawl": self.crawl,
+            "parse": self.parse,
+            "extract": self.extract,
+            "measured_total": self.total,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +161,28 @@ class FundPipelineResult:
     crawl_pass: str = CrawlPass.FAST.value
     superseded_documents: int = 0
 
+    # Everything recorded during the run, with an expected miss — a
+    # guessed sitemap address that does not exist — told apart from a
+    # real problem. ``failures`` keeps only what deserves attention.
+    diagnostics: tuple[Diagnostic, ...] = ()
+
+    # Where the wall clock of this fund went. A full first pass took
+    # eleven hours for a few thousand pages, and the only way to know
+    # which stage owns that is to measure each of them.
+    timings: StageTimings = StageTimings()
+
+    @property
+    def diagnostic_counts(self) -> dict[str, int]:
+        return summarize(list(self.diagnostics))
+
+    @property
+    def expected_misses(self) -> int:
+        return self.diagnostic_counts[DiagnosticLevel.EXPECTED_MISS.value]
+
+    @property
+    def real_failures(self) -> int:
+        return self.diagnostic_counts[DiagnosticLevel.FAILURE.value]
+
 
 @dataclass(frozen=True, slots=True)
 class BatchPipelineSummary:
@@ -155,6 +210,19 @@ class BatchPipelineSummary:
     @property
     def failed(self) -> int:
         return sum(1 for result in self.results if result.status is FundStatus.FAILED)
+
+
+# Parse failures that describe one document rather than the run. Any
+# other code — a MemoryError, an unexpected exception — is a failure.
+_DOCUMENT_PARSE_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "document_parse_error",
+        "parsed_document_storage_error",
+        "unsupported_document_format",
+        "scanned_document_ocr_failed",
+        "empty_document",
+    }
+)
 
 
 ProgressCallback = Callable[
@@ -339,6 +407,8 @@ async def run_fund_pipeline(
 
     failures: list[str] = []
 
+    diagnostics: list[Diagnostic] = []
+
     adapter_name: str | None = None
 
     official_discovery: OfficialDiscoveryResult | None = None
@@ -370,6 +440,8 @@ async def run_fund_pipeline(
         # The official website of the fund is exhausted first. An
         # external source may only add what the fund itself does not
         # publish, so the adapters run afterwards and only if needed.
+        discovery_started = perf_counter()
+
         official_result = await discover_official_sources(
             database_path=database_path,
             fund=fund,
@@ -385,6 +457,8 @@ async def run_fund_pipeline(
         official_discovery = official_result
 
         failures.extend(official_result.warnings)
+
+        diagnostics.extend(official_result.diagnostics)
 
         if official_result.is_sufficient:
             # The official site answered every required document group.
@@ -425,6 +499,10 @@ async def run_fund_pipeline(
             official_result.documents + adapter_result.documents
         )
 
+        discovery_seconds = perf_counter() - discovery_started
+
+        crawl_started = perf_counter()
+
         crawl_result = await crawl_fund_site(
             database_path=database_path,
             fund=fund,
@@ -438,6 +516,8 @@ async def run_fund_pipeline(
             force=force,
         )
 
+        crawl_seconds = perf_counter() - crawl_started
+
         # Keep an optional reference for the exception branch.
         crawl_summary = crawl_result
 
@@ -445,6 +525,22 @@ async def run_fund_pipeline(
             (f"{failure.stage}: {failure.url}: {failure.error_code}: {failure.message}")
             for failure in crawl_result.failures
         )
+
+        diagnostics.extend(
+            Diagnostic(
+                level=classify_fetch_failure(
+                    url=failure.url,
+                    code=failure.error_code,
+                ),
+                stage=failure.stage,
+                code=failure.error_code,
+                message=failure.message,
+                url=failure.url,
+            )
+            for failure in crawl_result.failures
+        )
+
+        parse_started = perf_counter()
 
         parsing_result = await parse_fund_documents(
             database_path=database_path,
@@ -454,12 +550,35 @@ async def run_fund_pipeline(
             allow_anydoc_fallback=anydoc_fallback,
         )
 
+        parse_seconds = perf_counter() - parse_started
+
         parsing_summary = parsing_result
 
         failures.extend(
             (f"parse_document: {failure.url}: {failure.error_code}: {failure.message}")
             for failure in parsing_result.failures
         )
+
+        # A document that will not parse costs one source. A parser that
+        # ran out of memory is a different kind of event and stays a
+        # failure, so that one MemoryError is not lost among 474 guessed
+        # sitemap addresses.
+        diagnostics.extend(
+            Diagnostic(
+                level=(
+                    DiagnosticLevel.FAILURE
+                    if failure.error_code not in _DOCUMENT_PARSE_CODES
+                    else DiagnosticLevel.WARNING
+                ),
+                stage="parse_document",
+                code=failure.error_code,
+                message=failure.message,
+                url=failure.url,
+            )
+            for failure in parsing_result.failures
+        )
+
+        extract_started = perf_counter()
 
         if output_lock is None:
             extraction_result = await asyncio.to_thread(
@@ -476,6 +595,8 @@ async def run_fund_pipeline(
                     output_path=output_path,
                     fund=fund,
                 )
+
+        extract_seconds = perf_counter() - extract_started
 
         extraction_summary = extraction_result
 
@@ -536,6 +657,13 @@ async def run_fund_pipeline(
             discovery_method_counts=tuple(sorted(official_result.metrics.method_counts.items())),
             crawl_pass=crawl_pass.value,
             superseded_documents=len(selection.superseded),
+            diagnostics=tuple(diagnostics),
+            timings=StageTimings(
+                discovery=round(discovery_seconds, 3),
+                crawl=round(crawl_seconds, 3),
+                parse=round(parse_seconds, 3),
+                extract=round(extract_seconds, 3),
+            ),
             failures=tuple(failures),
             duration_seconds=round(
                 perf_counter() - started,

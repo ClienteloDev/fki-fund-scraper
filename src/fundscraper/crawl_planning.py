@@ -18,9 +18,10 @@ Step 5 official-first discovery and the existing site crawler.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any, Final
 
 from fundscraper.discovery_priority import DOCUMENT_TYPE_RANK, file_name_of
@@ -200,6 +201,61 @@ UNANSWERED_STATUSES: Final[frozenset[str]] = frozenset(
 )
 
 
+# The fields worth a second crawl on their own. They are what the data
+# set is for, and a fund missing one of them is worth the budget.
+PRIORITY_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "minimum_investment",
+        "target_return",
+        "fees",
+        "assets_under_management",
+    }
+)
+
+
+# Fields a second crawl can plausibly recover, but which do not justify
+# the budget on their own.
+SUPPORTING_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "investment_horizon",
+        "manager",
+        "administrator",
+    }
+)
+
+
+# The dated series. Across the current data set they are found for a
+# small minority of funds, so their simple absence describes the market
+# rather than a gap in the crawl: sending every fund back out because it
+# has no annual-return table selects almost every fund and recovers
+# almost nothing. They earn a second pass only when the documents that
+# would carry them were not reached.
+HISTORICAL_SERIES_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "aum_history",
+        "annual_returns",
+        "historical_values",
+    }
+)
+
+
+# The document group whose absence means the reporting documents a
+# series is built from were never reached.
+REPORTING_DOCUMENT_GROUP: Final = "reporting_document"
+
+
+# A field that was found but could not be tied to this fund, or whose
+# sources contradicted each other. A better source can still settle it,
+# which an absent value on a fully explored site cannot.
+UNCONFIRMED_STATUSES: Final[frozenset[str]] = frozenset(
+    {
+        "ambiguous",
+        "conflicting",
+        "error",
+    }
+)
+
+
 # The audit verdicts that mean the delivered value cannot be trusted as
 # it stands. A suspicious value is deliberately not one of them on its
 # own: most suspicious findings are about how a number was read, not
@@ -230,10 +286,39 @@ SOURCE_FIXABLE_REASONS: Final[frozenset[str]] = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class DiscoveryOutcome:
+    """What the first pass learned about one fund's official sources."""
+
+    # Every required document group was found.
+    sufficient: bool = False
+
+    # The walk ended because there was nothing left to visit, rather than
+    # because the budget ran out. Only then is "absent" a fact about the
+    # site rather than about the budget.
+    exhausted: bool = False
+
+    missing_document_groups: tuple[str, ...] = ()
+
+    @property
+    def reporting_documents_unreached(self) -> bool:
+        """Return whether the documents a dated series lives in are missing."""
+
+        return REPORTING_DOCUMENT_GROUP in self.missing_document_groups
+
+
+# What is assumed about a fund the first pass said nothing about. Not
+# exhausted and not sufficient is the cautious reading: it keeps the old
+# behaviour for any caller that supplies no discovery outcome.
+UNKNOWN_DISCOVERY: Final = DiscoveryOutcome()
+
+
 class DeepPassTrigger(StrEnum):
     """Why one field sent its fund into the deep pass."""
 
     FIELD_UNANSWERED = "field_unanswered"
+    SERIES_SOURCES_UNREACHED = "series_sources_unreached"
+    VALUE_UNCONFIRMED = "value_unconfirmed"
     AUDIT_REJECTED = "audit_rejected"
     AUDIT_CONFLICTING = "audit_conflicting"
     SOURCE_FIXABLE_FINDING = "source_fixable_finding"
@@ -268,6 +353,24 @@ class DeepPassPlan:
         return tuple(seen)
 
     @property
+    def priority(self) -> int:
+        """
+        Return how much a second crawl of this fund is worth.
+
+        A priority field counts for more than a supporting one, and a
+        historical series for least, so that a capped deep pass spends
+        its budget on the funds whose missing fields matter most.
+        """
+
+        return sum(
+            _FIELD_WEIGHTS.get(
+                reason.field,
+                1,
+            )
+            for reason in self.reasons
+        )
+
+    @property
     def wanted_document_types(self) -> frozenset[DocumentType]:
         """Return the document types that would answer the open fields."""
 
@@ -282,22 +385,36 @@ class DeepPassPlan:
         return frozenset(wanted)
 
 
+# What one open field of each class contributes to a fund's priority.
+_FIELD_WEIGHTS: Final[dict[str, int]] = {
+    **{name: 10 for name in PRIORITY_FIELDS},
+    **{name: 3 for name in SUPPORTING_FIELDS},
+    **{name: 1 for name in HISTORICAL_SERIES_FIELDS},
+}
+
+
 def select_deep_pass_funds(
     *,
     output_records: Sequence[dict[str, Any]],
     audit_findings: Sequence[dict[str, Any]] = (),
     conflict_records: Sequence[dict[str, Any]] = (),
+    discovery_outcomes: Mapping[str, DiscoveryOutcome] = MappingProxyType({}),
 ) -> list[DeepPassPlan]:
     """
     Decide which funds are worth crawling a second time, and why.
 
-    Three inputs are read, and each of them answers a different question.
-    The delivered output says which fields have no answer at all. The
-    Step 4 audit says which delivered answers are wrong or contradictory.
-    The Step 8 conflict report says which fields two different sources
-    disagree about — and, importantly, which ones only look contested
-    because one document was read twice, which no amount of crawling can
-    fix.
+    Four inputs are read, and each answers a different question. The
+    delivered output says which fields have no answer. The Step 4 audit
+    says which delivered answers are wrong or contradictory. The Step 8
+    conflict report says which fields two *different sources* disagree
+    about — a conflict inside one document is skipped, because a wider
+    crawl returns the same document. The discovery outcome of the first
+    pass says whether anything is left to find at all.
+
+    That last input is what keeps the selection honest. A field that is
+    simply absent from a site the first pass explored to the end and
+    found every expected document on is not a crawling problem, and
+    sending the fund back out cannot fix it.
     """
 
     reasons_by_fund: dict[str, list[DeepPassReason]] = {}
@@ -312,6 +429,11 @@ def select_deep_pass_funds(
 
         names_by_fund[fund_id] = str(record.get("name") or "")
 
+        outcome = discovery_outcomes.get(
+            fund_id,
+            UNKNOWN_DISCOVERY,
+        )
+
         for field_name in TRIGGER_FIELDS:
             payload = record.get(field_name)
 
@@ -323,13 +445,22 @@ def select_deep_pass_funds(
             if status not in UNANSWERED_STATUSES:
                 continue
 
+            trigger = _unanswered_trigger(
+                field_name=field_name,
+                status=status,
+                outcome=outcome,
+            )
+
+            if trigger is None:
+                continue
+
             reasons_by_fund.setdefault(
                 fund_id,
                 [],
             ).append(
                 DeepPassReason(
                     field=field_name,
-                    trigger=DeepPassTrigger.FIELD_UNANSWERED,
+                    trigger=trigger,
                     detail=f"The delivered field is {status}.",
                 )
             )
@@ -420,12 +551,51 @@ def select_deep_pass_funds(
         for fund_id, reasons in sorted(
             reasons_by_fund.items(),
             key=lambda item: (
+                -sum(_FIELD_WEIGHTS.get(reason.field, 1) for reason in item[1]),
                 -len(item[1]),
                 item[0],
             ),
         )
         if reasons
     ]
+
+
+def _unanswered_trigger(
+    *,
+    field_name: str,
+    status: str,
+    outcome: DiscoveryOutcome,
+) -> DeepPassTrigger | None:
+    """
+    Decide whether one unanswered field is worth another crawl.
+
+    A value that was found but could not be confirmed is always worth
+    one: a better source can settle it. A value that is simply absent is
+    worth one only while there is somewhere left to look.
+    """
+
+    if status in UNCONFIRMED_STATUSES:
+        return DeepPassTrigger.VALUE_UNCONFIRMED
+
+    if field_name in HISTORICAL_SERIES_FIELDS:
+        # A dated series is absent from most funds because most funds do
+        # not publish one. Only an unreached reporting document makes it
+        # a crawling problem.
+        if outcome.reporting_documents_unreached:
+            return DeepPassTrigger.SERIES_SOURCES_UNREACHED
+
+        return None
+
+    if outcome.sufficient and outcome.exhausted:
+        # The site was explored to the end and published everything it
+        # was expected to. The field is absent because the fund does not
+        # state it, and no budget changes that.
+        return None
+
+    if field_name in PRIORITY_FIELDS or field_name in SUPPORTING_FIELDS:
+        return DeepPassTrigger.FIELD_UNANSWERED
+
+    return None
 
 
 def conflict_is_between_sources(

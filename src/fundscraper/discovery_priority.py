@@ -97,6 +97,13 @@ DOCUMENT_KEYWORDS: Final[tuple[tuple[str, int], ...]] = (
 SECTION_KEYWORDS: Final[tuple[tuple[str, int], ...]] = (
     ("povinne informace", 55),
     ("povinne uverejnovane informace", 55),
+    # The same section under the wording most Czech fund sites actually
+    # use. It is the commonest of the three - the retained pages of 56
+    # canonical funds carry it, against 21 and 29 for the two above -
+    # and without it a fund whose only route to its statute and key
+    # information document is that link is crawled one page deep.
+    # The entry also matches the declined "informacni povinnosti".
+    ("informacni povinnost", 55),
     ("ke stazeni", 50),
     ("dokumenty", 50),
     ("dokumenty fondu", 55),

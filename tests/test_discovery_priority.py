@@ -193,3 +193,34 @@ def test_a_wanted_document_type_outranks_an_unwanted_one_of_the_same_kind() -> N
             wanted_document_types=frozenset({DocumentType.ANNUAL_REPORT}),
         ).value
     )
+
+
+def test_recognises_the_inverted_mandatory_information_wording() -> None:
+    """
+    A Czech fund site labels its disclosure page "Informační povinnost".
+
+    The vocabulary carried "povinné informace" and "povinné uveřejňované
+    informace" but not the inverted form, which is the commonest of the three:
+    it appears on the retained pages of 56 canonical funds against 21 and 29
+    for the two that were covered. A fund whose only route to its statute and
+    key information document is that link was crawled one page deep and left
+    with nothing.
+    """
+
+    assert (
+        _score(
+            "https://example.cz/?page_id=51",
+            anchor_text="Informační povinnost",
+        )
+        >= NAVIGATION_THRESHOLD
+    )
+
+
+def test_the_declined_form_of_the_same_label_is_recognised() -> None:
+    assert (
+        _score(
+            "https://example.cz/plneni-informacni-povinnosti",
+            anchor_text="Plnění informační povinnosti",
+        )
+        >= NAVIGATION_THRESHOLD
+    )

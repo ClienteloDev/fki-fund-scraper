@@ -61,6 +61,7 @@ def scope_of(
     title: str,
     text: str,
     quote: str = "",
+    value_offset: int | None = None,
 ) -> SourceScope:
     return classify_source_scope(
         fund_name=fund_name,
@@ -68,6 +69,7 @@ def scope_of(
         source_title=title,
         document_text=text,
         quote=quote or text,
+        value_offset=value_offset,
     )
 
 
@@ -541,3 +543,168 @@ def test_similar_subfund_slug_does_not_grant_ownership() -> None:
             fund_tokens=tokens,
             source_url=foreign_url,
         )
+
+
+# The homepage of Nemomax, whose legal name carries the boilerplate
+# phrase "s proměnným základním kapitálem". The parameters below are the
+# ones the site prints in its own key/value table.
+NEMOMAX_HOMEPAGE_URL = "https://nemomax.cz/"
+
+NEMOMAX_HOMEPAGE_TEXT = "\n".join(
+    (
+        "INVESTUJTE DO NEMOVITOSTI",
+        "ZAKLADNI PARAMETRY",
+        "Minimalni investice klienta",
+        "1 mil. Kc",
+        "Investicni horizont klienta",
+        "Strednedoby, 4 roky",
+        "Obhospodarovatel a administrator fondu",
+        "AVANT investicni spolecnost, a.s.",
+        "KONTAKT",
+        "Nemomax investicni fond s promennym zakladnim kapitalem, a.s.",
+        "Hvezdova 1716/2b, 140 00 Praha 4",
+    )
+)
+
+
+def test_legal_form_boilerplate_is_not_an_identity_token() -> None:
+    """
+    "zakladnim" comes from "s proměnným základním kapitálem".
+
+    The mention parser reads a legal name only as far as its
+    "investiční fond" head, so a name token standing after that head can
+    never appear in a mention. Treating it as distinctive made 29 of the
+    341 canonical funds unable to match their own name.
+    """
+
+    from fundscraper.field_extraction import fund_identity_tokens
+
+    assert fund_identity_tokens(
+        "Nemomax investiční fond s proměnným základním kapitálem, a.s."
+    ) == ("nemomax",)
+
+
+def test_fund_recognises_its_own_name_on_its_own_homepage() -> None:
+    """The whole delivery of Nemomax was refused as belonging to another fund."""
+
+    assert (
+        scope_of(
+            fund_name="Nemomax investiční fond s proměnným základním kapitálem, a.s.",
+            url=NEMOMAX_HOMEPAGE_URL,
+            title="Nemomax",
+            text=NEMOMAX_HOMEPAGE_TEXT,
+            quote="Investicni horizont klienta\nStrednedoby, 4 roky",
+        )
+        is SourceScope.EXACT_FUND
+    )
+
+
+def test_homepage_of_a_fund_yields_its_published_parameters() -> None:
+    document = create_extraction_document(
+        source_id=1,
+        url=NEMOMAX_HOMEPAGE_URL,
+        title="Nemomax",
+        text=NEMOMAX_HOMEPAGE_TEXT,
+        document_type="marketing_page",
+    )
+
+    result = extract_fund_fields(
+        fund_name="Nemomax investiční fond s proměnným základním kapitálem, a.s.",
+        documents=[document],
+        fund_web="https://nemomax.cz",
+    )
+
+    assert result.investment_horizon.status is FieldStatus.FOUND
+    assert result.investment_horizon.value is not None
+    assert result.investment_horizon.value.recommended_years == 4
+
+
+def test_boilerplate_token_removal_does_not_widen_a_shared_name() -> None:
+    """
+    Two funds of one house differ only by their distinctive words.
+
+    Dropping the legal-form boilerplate must not let the page of one of
+    them answer for the other.
+    """
+
+    text = "\n".join(
+        (
+            "SPM FINANCE investicni fond s promennym zakladnim kapitalem, a.s.",
+            "Minimalni investice cini 3 000 000 Kc.",
+        )
+    )
+
+    assert (
+        scope_of(
+            fund_name="SPM GROUP investiční fond s proměnným základním kapitálem, a.s.",
+            url="https://www.spmgroup.cz/fondy/spm-finance/",
+            title="SPM FINANCE",
+            text=text,
+            quote="Minimalni investice cini 3 000 000 Kc.",
+        )
+        is not SourceScope.EXACT_FUND
+    )
+
+
+# The FAQ page of a manager whose brand host the canonical input records as
+# one fund's website. The page names no fund of its own in a form the mention
+# parser recognises, and the figure it states is about qualified investor
+# funds in general.
+MANAGER_FAQ_URL = "https://akro.cz/otazky/"
+
+MANAGER_FAQ_TEXT = "\n".join(
+    (
+        "Nejcastejsi otazky",
+        "AKRO fond progresivnich spolecnosti, otevreny podilovy fond,",
+        "AKRO investicni spolecnost, a.s., ISIN: CZ0008471091",
+        "Jake jsou minimalni investice do fondu kvalifikovanych investoru?",
+        "Minimalni investice do fondu kvalifikovanych investoru je obvykle 1 000 000 CZK,",
+        "ale muze byt i vyssi v zavislosti na konkretnim fondu.",
+    )
+)
+
+
+def test_own_host_does_not_adopt_a_page_that_names_no_fund() -> None:
+    """
+    A host recorded for one fund is not always that fund's own site.
+
+    The canonical input records a manager's brand host as the website of a
+    single fund, and the manager's pages talk about its other products and
+    about qualified investor funds in general. Accepting such a page merely
+    because the host is in the register gave ALT a minimum investment, a
+    target return, assets and both parties out of AKRO's own material.
+    """
+
+    assert (
+        scope_of(
+            fund_name="ALT investiční fond SICAV a.s.",
+            url=MANAGER_FAQ_URL,
+            title="Otazky",
+            text=MANAGER_FAQ_TEXT,
+            quote=(
+                "Minimalni investice do fondu kvalifikovanych investoru je obvykle 1 000 000 CZK"
+            ),
+            value_offset=MANAGER_FAQ_TEXT.index("Minimalni investice"),
+        )
+        is not SourceScope.EXACT_FUND
+    )
+
+
+def test_generic_qualified_investor_minimum_is_not_this_funds_minimum() -> None:
+    """The whole extraction must refuse it, not only the scope call."""
+
+    document = create_extraction_document(
+        source_id=1,
+        url=MANAGER_FAQ_URL,
+        title="Otazky",
+        text=MANAGER_FAQ_TEXT,
+        document_type="marketing_page",
+    )
+
+    result = extract_fund_fields(
+        fund_name="ALT investiční fond SICAV a.s.",
+        documents=[document],
+        fund_web="https://akro.cz",
+    )
+
+    assert result.minimum_investment.status is not FieldStatus.FOUND

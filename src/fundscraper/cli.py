@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections import Counter
 from pathlib import Path
+from time import perf_counter
 from typing import Annotated
 
 import typer
@@ -12,10 +13,7 @@ from fundscraper.config import (
     ConfigurationError,
     HttpSettings,
 )
-from fundscraper.crawl_planning import (
-    DEEP_BUDGET,
-    FAST_BUDGET,
-)
+from fundscraper.crawl_planning import CrawlPass
 from fundscraper.crawl_service import (
     CrawlError,
     CrawlSummary,
@@ -29,6 +27,16 @@ from fundscraper.database import (
     register_funds,
     reset_database,
     validate_database,
+)
+from fundscraper.delivery_export import (
+    DeliveryExportError,
+    audit_mismatch_reason,
+    build_delivery_records,
+    delivery_summary,
+    input_digest,
+    load_audit,
+    load_records,
+    write_delivery_output,
 )
 from fundscraper.discovery_service import (
     DiscoverySummary,
@@ -87,7 +95,7 @@ from fundscraper.http_client import (
     FetchResult,
     HttpFetcher,
 )
-from fundscraper.input_loader import InputFileError, load_funds
+from fundscraper.input_loader import InputFileError, load_funds, select_funds_by_web
 from fundscraper.models import FundInput
 from fundscraper.normalization import canonical_domain, canonical_url
 from fundscraper.official_discovery import (
@@ -262,7 +270,7 @@ def generate_schema(
             help="Path for the generated JSON Schema file.",
             dir_okay=False,
         ),
-    ] = Path("docs/funds-output.schema.json"),
+    ] = Path("schemas/extended-output.schema.json"),
 ) -> None:
     """Generate JSON Schema for the enriched output data."""
 
@@ -2526,6 +2534,25 @@ def two_pass_command(
             help="Run only the fast pass and report what the deep pass would do.",
         ),
     ] = False,
+    deep_limit: Annotated[
+        int,
+        typer.Option(
+            "--deep-limit",
+            min=0,
+            help=(
+                "Crawl at most this many funds in the deep pass, "
+                "highest priority first. 0 means every selected fund."
+            ),
+        ),
+    ] = 0,
+    progress_every: Annotated[
+        int,
+        typer.Option(
+            "--progress-every",
+            min=1,
+            help="Print a progress line every N funds.",
+        ),
+    ] = 10,
     force: Annotated[
         bool,
         typer.Option(
@@ -2577,6 +2604,43 @@ def two_pass_command(
 
         settings = HttpSettings.from_environment()
 
+        started = perf_counter()
+
+        def show_progress(
+            crawl_pass: CrawlPass,
+            done: int,
+            total: int,
+            result: FundPipelineResult,
+        ) -> None:
+            # One line every few funds, never one per request. A run of
+            # several hundred funds otherwise buries its own summary.
+            if done % progress_every and done != total:
+                return
+
+            elapsed = perf_counter() - started
+
+            label = crawl_pass.value.upper()
+
+            line = (
+                f"{label} {done}/{total} | fund={result.fund_name[:34]} "
+                f"| pages={result.pages_visited} | docs={result.documents_downloaded} "
+                f"| elapsed={_duration(elapsed)}"
+            )
+
+            if crawl_pass is CrawlPass.DEEP:
+                targets = ",".join(
+                    sorted(wanted_by_fund.get(result.fund_id, ()))[:4],
+                )
+
+                line = (
+                    f"{label} {done}/{total} | fund={result.fund_name[:34]} "
+                    f"| targets={targets or '-'}"
+                )
+
+            typer.echo(line)
+
+        wanted_by_fund: dict[str, tuple[str, ...]] = {}
+
         async def run() -> tuple[TwoPassSummary, int, int]:
             async with HttpFetcher(
                 settings,
@@ -2597,7 +2661,9 @@ def two_pass_command(
                         conflicts_path,
                         "conflicts",
                     ),
-                    deep_budget=(FAST_BUDGET if skip_deep_pass else DEEP_BUDGET),
+                    skip_deep_pass=skip_deep_pass,
+                    deep_limit=deep_limit,
+                    progress=show_progress,
                     concurrency=concurrency,
                     force=force,
                     avant_fallback=avant_fallback,
@@ -2637,7 +2703,10 @@ def two_pass_command(
 
     deep = summary.deep_metrics
 
+    runtime = (summary.finished_at - summary.started_at).total_seconds()
+
     typer.echo("")
+    typer.echo(f"Runtime: {_duration(runtime)}")
     typer.echo(f"Canonical funds registered: {summary.canonical_funds}")
     typer.echo(
         f"Fast pass:  {fast.funds} funds, {fast.pages_visited} pages, "
@@ -2645,16 +2714,86 @@ def two_pass_command(
     )
     typer.echo(f"Deep pass selected: {len(summary.plans)} funds")
     typer.echo(
-        f"Deep pass:  {deep.funds} funds, {deep.pages_visited} pages, "
+        f"Deep pass executed: {deep.funds} funds, {deep.pages_visited} pages, "
         f"{deep.documents_downloaded} documents"
     )
     typer.echo(
         f"Superseded copies skipped: {fast.superseded_documents + deep.superseded_documents}"
     )
+    typer.echo(
+        f"Expected sitemap misses: {fast.expected_misses + deep.expected_misses}"
+        f" | warnings: {fast.warnings + deep.warnings}"
+        f" | real failures: {fast.real_failures + deep.real_failures}"
+    )
     typer.echo(f"HTTP cache: {cache_hits} hits, {cache_misses} misses")
     typer.echo(f"Recovered fields: {len(summary.recovered_fields)}")
+
+    stages = ", ".join(
+        f"{name}={_duration(value)}"
+        for name, value in (
+            ("discovery", fast.discovery_seconds + deep.discovery_seconds),
+            ("crawl", fast.crawl_seconds + deep.crawl_seconds),
+            ("parse", fast.parse_seconds + deep.parse_seconds),
+            ("extract", fast.extract_seconds + deep.extract_seconds),
+        )
+    )
+
+    typer.echo(f"Fund time by stage: {stages}")
+
+    slowest = sorted(
+        summary.fast_results + summary.deep_results,
+        key=lambda item: -item.duration_seconds,
+    )[:5]
+
+    if slowest:
+        typer.echo("")
+        typer.echo("Slowest funds:")
+
+        for item in slowest:
+            typer.echo(
+                f"  {_duration(item.duration_seconds):>8}  {item.fund_name[:44]:46s}"
+                f" parse={_duration(item.timings.parse)}"
+                f" extract={_duration(item.timings.extract)}"
+            )
+
+    triggers: Counter[str] = Counter(
+        reason.trigger.value for plan in summary.plans for reason in plan.reasons
+    )
+
+    if triggers:
+        typer.echo("")
+        typer.echo("Top deep-pass trigger reasons:")
+
+        for trigger, count in triggers.most_common(5):
+            typer.echo(f"  {trigger:32s}{count}")
+
+    typer.echo("")
     typer.echo(f"Output file: {summary.output_path}")
     typer.echo(f"Report file: {report_path}")
+
+
+def _duration(
+    seconds: float,
+) -> str:
+    """Return a duration a reader can compare at a glance."""
+
+    minutes, remaining = divmod(
+        int(seconds),
+        60,
+    )
+
+    hours, minutes = divmod(
+        minutes,
+        60,
+    )
+
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+
+    if minutes:
+        return f"{minutes}m{remaining:02d}s"
+
+    return f"{remaining}s"
 
 
 def _two_pass_selection(
@@ -2696,3 +2835,363 @@ def _report_section(
         return []
 
     return [item for item in section if isinstance(item, dict)]
+
+
+@app.command("export-delivery")
+def export_delivery_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Internal auditable output to convert.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/output/funds.full.json"),
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Clean delivery JSON to write.",
+            dir_okay=False,
+        ),
+    ] = Path("data/output/funds.delivery.json"),
+    audit_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--audit",
+            help=(
+                "Audit report. Any field the audit doubts is delivered as "
+                "not_found. Required unless --unsafe-without-audit is given."
+            ),
+            dir_okay=False,
+        ),
+    ] = None,
+    unsafe_without_audit: Annotated[
+        bool,
+        typer.Option(
+            "--unsafe-without-audit",
+            help=(
+                "Export on the extraction status alone. Suspicious, "
+                "conflicting and rejected values are then delivered as "
+                "found. For development only."
+            ),
+        ),
+    ] = False,
+    include_source_url: Annotated[
+        bool,
+        typer.Option(
+            "--source-url/--no-source-url",
+            help="Keep the document address of a delivered value.",
+        ),
+    ] = True,
+) -> None:
+    """
+    Write the clean delivery JSON derived from the internal output.
+
+    The internal file is only read. Each field becomes a status and a
+    value; nothing about how the value was found crosses over.
+    """
+
+    resolved_input = input_path.resolve()
+
+    resolved_output = output_path.resolve()
+
+    if audit_path is None and not unsafe_without_audit:
+        # A value can be found and still be wrong in a way only the audit
+        # knows about — an implausible per-share figure delivered as fund
+        # capital, a series dated in the future. Exporting without the
+        # audit hands those to a reader as clean data, so it has to be
+        # asked for explicitly.
+        typer.echo(
+            "An audit report is required for a safe delivery export. "
+            "Produce one with scripts/audit_enriched_output.py and pass "
+            "--audit, or pass --unsafe-without-audit to export on the "
+            "extraction status alone.",
+            err=True,
+        )
+
+        raise typer.Exit(code=1)
+
+    if resolved_input == resolved_output:
+        typer.echo(
+            "The delivery output must not overwrite the internal output.",
+            err=True,
+        )
+
+        raise typer.Exit(code=1)
+
+    try:
+        records = load_records(resolved_input)
+
+        audit = load_audit(
+            audit_path.resolve() if audit_path is not None else None,
+        )
+
+        if audit_path is not None:
+            # The audit is only worth applying to the file it was made
+            # from. Every run of this project produces the same fund
+            # identifiers, so an overlap of names proves nothing; the
+            # digest of the audited bytes does.
+            mismatch = audit_mismatch_reason(
+                audit=audit,
+                records=records,
+                input_sha256=input_digest(resolved_input),
+            )
+
+            if mismatch is not None:
+                typer.echo(
+                    f"The audit report does not describe this input: {mismatch}. "
+                    "Re-run scripts/audit_enriched_output.py against this exact "
+                    "file before exporting.",
+                    err=True,
+                )
+
+                raise typer.Exit(code=1)
+
+        findings = list(audit.findings)
+
+        delivered = build_delivery_records(
+            records=records,
+            audit_findings=findings,
+            include_source_url=include_source_url,
+        )
+
+        write_delivery_output(
+            records=delivered,
+            path=resolved_output,
+        )
+    except DeliveryExportError as exc:
+        typer.echo(
+            f"Delivery export failed: {exc}",
+            err=True,
+        )
+
+        raise typer.Exit(code=1) from exc
+
+    counts = delivery_summary(delivered)
+
+    typer.echo(f"Internal input: {resolved_input}")
+    typer.echo(f"Delivery output: {resolved_output}")
+    typer.echo(f"Funds: {len(delivered)}")
+    typer.echo(
+        "Audit applied: "
+        + (
+            f"{audit_path} ({len(findings)} findings)"
+            if audit_path
+            else "NO - exported without an audit, values may be unsafe"
+        )
+    )
+    typer.echo("")
+    typer.echo("Delivered values per field:")
+
+    for field, count in counts.items():
+        typer.echo(f"  {field:26s}{count:>6}")
+
+
+@app.command("acquire-documents")
+def acquire_documents_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            "-i",
+            help="Path to funds.json.",
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("data/input/funds.json"),
+    database_path: Annotated[
+        Path,
+        typer.Option(
+            "--database",
+            "-d",
+            help="SQLite processing database.",
+            dir_okay=False,
+        ),
+    ] = Path("cache/fundscraper.sqlite3"),
+    cache_directory: Annotated[
+        Path,
+        typer.Option(
+            "--cache-directory",
+            help="HTTP cache directory.",
+            file_okay=False,
+        ),
+    ] = Path("cache/http"),
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help="Directory for the acquisition manifest and report.",
+            file_okay=False,
+        ),
+    ] = None,
+    web_contains: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--web-contains",
+            help=(
+                "Only process funds whose input web contains this text. "
+                "Repeat to OR several values. Case-insensitive."
+            ),
+        ),
+    ] = None,
+    list_selected: Annotated[
+        bool,
+        typer.Option(
+            "--list-selected",
+            help="Print the selected funds and exit without acquiring anything.",
+        ),
+    ] = False,
+    max_pages: Annotated[
+        int,
+        typer.Option(
+            "--max-pages",
+            min=1,
+            max=100,
+        ),
+    ] = 25,
+    max_depth: Annotated[
+        int,
+        typer.Option(
+            "--max-depth",
+            min=0,
+            max=5,
+        ),
+    ] = 2,
+    max_documents: Annotated[
+        int,
+        typer.Option(
+            "--max-documents",
+            min=0,
+            max=100,
+        ),
+    ] = 20,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Ignore cached HTTP responses.",
+        ),
+    ] = False,
+) -> None:
+    """
+    Discover and download documents for a subset of funds.
+
+    This is acquisition only: it visits pages, downloads the documents it
+    finds and records their provenance. It does not parse fields, does
+    not normalise values and does not write any delivery output, so it
+    can be pointed at a scratch database and cache without disturbing the
+    production corpus.
+    """
+
+    try:
+        funds = load_funds(input_path)
+        selected = select_funds_by_web(funds, web_contains or [])
+    except InputFileError as exc:
+        typer.echo(f"Input error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Input funds: {len(funds)}")
+    typer.echo(f"Selected funds: {len(selected)}")
+
+    if web_contains:
+        typer.echo("Filter: web contains " + " OR ".join(sorted(web_contains)))
+
+    if not selected:
+        typer.echo("No fund matched the filter; nothing to do.")
+        return
+
+    if list_selected:
+        for index, fund in enumerate(selected, start=1):
+            typer.echo(f"{index:>4}. {fund.name}  [{fund.web or '-'}]")
+        return
+
+    summaries: list[CrawlSummary] = []
+    failures: list[str] = []
+
+    try:
+        initialize_database(database_path)
+        register_funds(database_path, funds)
+
+        settings = HttpSettings.from_environment()
+
+        async def run_all() -> None:
+            async with HttpFetcher(settings, cache_directory) as fetcher:
+                for position, fund in enumerate(selected, start=1):
+                    typer.echo(f"[{position}/{len(selected)}] {fund.name}")
+                    try:
+                        summaries.append(
+                            await crawl_fund_site(
+                                database_path=database_path,
+                                fund=fund,
+                                fetcher=fetcher,
+                                max_pages=max_pages,
+                                max_depth=max_depth,
+                                max_documents=max_documents,
+                                force=force,
+                            )
+                        )
+                    except (FetchError, CrawlError) as exc:
+                        failures.append(f"{fund.name}: {exc}")
+
+        asyncio.run(run_all())
+    except (
+        InputFileError,
+        DatabaseError,
+        ConfigurationError,
+        FetchError,
+        CrawlError,
+    ) as exc:
+        typer.echo(f"Acquisition failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    pages = sum(s.pages_visited for s in summaries)
+    discovered = sum(s.documents_discovered for s in summaries)
+    downloaded = sum(s.documents_downloaded for s in summaries)
+    crawl_failures = sum(len(s.failures) for s in summaries)
+
+    typer.echo("")
+    typer.echo(f"Funds processed: {len(summaries)}")
+    typer.echo(f"Pages visited: {pages}")
+    typer.echo(f"Documents discovered: {discovered}")
+    typer.echo(f"Documents downloaded: {downloaded}")
+    typer.echo(f"Crawl failures: {crawl_failures}")
+    typer.echo(f"Funds that raised an error: {len(failures)}")
+
+    for failure in failures:
+        typer.echo(f"- {failure}")
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = {
+            "input": str(input_path),
+            "database": str(database_path),
+            "cache_directory": str(cache_directory),
+            "web_contains": list(web_contains or []),
+            "funds_selected": len(selected),
+            "funds_processed": len(summaries),
+            "pages_visited": pages,
+            "documents_discovered": discovered,
+            "documents_downloaded": downloaded,
+            "crawl_failures": crawl_failures,
+            "fund_errors": failures,
+            "per_fund": [
+                {
+                    "fund_name": s.fund_name,
+                    "pages_visited": s.pages_visited,
+                    "documents_discovered": s.documents_discovered,
+                    "documents_downloaded": s.documents_downloaded,
+                    "failures": len(s.failures),
+                }
+                for s in summaries
+            ],
+        }
+        path = output_dir / "acquisition-summary.json"
+        path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=1) + "\n",
+            encoding="utf-8",
+        )
+        typer.echo(f"Summary: {path}")

@@ -30,13 +30,10 @@ def read_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
     except FileNotFoundError as exc:
-        raise DeliveryValidationError(
-            f"Delivery output does not exist: {path}"
-        ) from exc
+        raise DeliveryValidationError(f"Delivery output does not exist: {path}") from exc
     except json.JSONDecodeError as exc:
         raise DeliveryValidationError(
-            f"Invalid JSON at line {exc.lineno}, "
-            f"column {exc.colno}: {exc.msg}"
+            f"Invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
         ) from exc
 
 
@@ -50,16 +47,12 @@ def require_exact_keys(
     if actual != expected:
         missing = sorted(expected - actual)
         extra = sorted(actual - expected)
-        raise DeliveryValidationError(
-            f"{label} has invalid keys; missing={missing}, extra={extra}"
-        )
+        raise DeliveryValidationError(f"{label} has invalid keys; missing={missing}, extra={extra}")
 
 
 def require_string(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise DeliveryValidationError(
-            f"{label} must be a non-empty string"
-        )
+        raise DeliveryValidationError(f"{label} must be a non-empty string")
     return value.strip()
 
 
@@ -68,9 +61,7 @@ def validate_url(value: Any, label: str) -> None:
     parsed = urlparse(text)
 
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise DeliveryValidationError(
-            f"{label} must be a valid HTTP(S) URL"
-        )
+        raise DeliveryValidationError(f"{label} must be a valid HTTP(S) URL")
 
 
 def validate_date(value: Any, label: str) -> None:
@@ -79,9 +70,7 @@ def validate_date(value: Any, label: str) -> None:
     try:
         datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise DeliveryValidationError(
-            f"{label} must be ISO 8601"
-        ) from exc
+        raise DeliveryValidationError(f"{label} must be ISO 8601") from exc
 
 
 def validate_found_field(field: dict[str, Any], label: str) -> None:
@@ -92,16 +81,12 @@ def validate_found_field(field: dict[str, Any], label: str) -> None:
     )
 
     if field["value"] is None:
-        raise DeliveryValidationError(
-            f"{label}.value must not be null"
-        )
+        raise DeliveryValidationError(f"{label}.value must not be null")
 
     source = field["source"]
 
     if not isinstance(source, dict):
-        raise DeliveryValidationError(
-            f"{label}.source must be an object"
-        )
+        raise DeliveryValidationError(f"{label}.source must be an object")
 
     allowed_source_keys = {
         "url",
@@ -116,9 +101,7 @@ def validate_found_field(field: dict[str, Any], label: str) -> None:
     actual_source_keys = set(source)
 
     if not required_source_keys.issubset(actual_source_keys):
-        raise DeliveryValidationError(
-            f"{label}.source must contain url and retrieved_at"
-        )
+        raise DeliveryValidationError(f"{label}.source must contain url and retrieved_at")
 
     if not actual_source_keys.issubset(allowed_source_keys):
         raise DeliveryValidationError(
@@ -152,9 +135,7 @@ def validate_not_found_field(
     reason = field["reason"]
 
     if not isinstance(reason, dict):
-        raise DeliveryValidationError(
-            f"{label}.reason must be an object"
-        )
+        raise DeliveryValidationError(f"{label}.reason must be an object")
 
     require_exact_keys(
         reason,
@@ -176,9 +157,7 @@ def validate_record(record: Any, index: int) -> str:
     label = f"funds[{index}]"
 
     if not isinstance(record, dict):
-        raise DeliveryValidationError(
-            f"{label} must be an object"
-        )
+        raise DeliveryValidationError(f"{label} must be an object")
 
     require_exact_keys(
         record,
@@ -200,9 +179,7 @@ def validate_record(record: Any, index: int) -> str:
         field_label = f"{label}.{field_name}"
 
         if not isinstance(field, dict):
-            raise DeliveryValidationError(
-                f"{field_label} must be an object"
-            )
+            raise DeliveryValidationError(f"{field_label} must be an object")
 
         status = field.get("status")
 
@@ -211,18 +188,13 @@ def validate_record(record: Any, index: int) -> str:
         elif status == "not_found":
             validate_not_found_field(field, field_label)
         else:
-            raise DeliveryValidationError(
-                f"{field_label}.status must be "
-                "'found' or 'not_found'"
-            )
+            raise DeliveryValidationError(f"{field_label}.status must be 'found' or 'not_found'")
 
     return name.casefold()
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Validate the concise delivery funds JSON."
-    )
+    parser = argparse.ArgumentParser(description="Validate the concise delivery funds JSON.")
     parser.add_argument(
         "path",
         type=Path,
@@ -240,24 +212,15 @@ def main() -> int:
     payload = read_json(args.path.resolve())
 
     if not isinstance(payload, list):
-        raise DeliveryValidationError(
-            "Delivery output root must be a JSON array"
-        )
+        raise DeliveryValidationError("Delivery output root must be a JSON array")
 
     if args.expected_funds and len(payload) != args.expected_funds:
-        raise DeliveryValidationError(
-            f"Expected {args.expected_funds} funds, found {len(payload)}"
-        )
+        raise DeliveryValidationError(f"Expected {args.expected_funds} funds, found {len(payload)}")
 
-    normalized_names = [
-        validate_record(record, index)
-        for index, record in enumerate(payload)
-    ]
+    normalized_names = [validate_record(record, index) for index, record in enumerate(payload)]
 
     if len(normalized_names) != len(set(normalized_names)):
-        raise DeliveryValidationError(
-            "Delivery output contains duplicate fund names"
-        )
+        raise DeliveryValidationError("Delivery output contains duplicate fund names")
 
     found_fields = sum(
         1

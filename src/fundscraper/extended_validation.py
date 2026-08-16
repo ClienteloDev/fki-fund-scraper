@@ -25,15 +25,24 @@ import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Final
 from urllib.parse import urlsplit
 
-from fundscraper.field_definitions import NON_FUND_CAPITAL_METRICS
+from fundscraper.field_definitions import (
+    HORIZON_MAXIMUM_MARKERS,
+    NON_FUND_CAPITAL_METRICS,
+    classify_capital_metric,
+    classify_horizon_kind,
+    fold_diacritics,
+    states_a_horizon_range,
+    states_benchmark_linked_return,
+)
 from fundscraper.html_discovery import normalize_search_text
 from fundscraper.normalization import canonical_domain
 from fundscraper.output_models import (
+    Annualization,
     AnnualReturnObservation,
     AssetsUnderManagementValue,
     AumMetricType,
@@ -44,6 +53,7 @@ from fundscraper.output_models import (
     FundParty,
     HistoricalValueSeries,
     HistoricalValueType,
+    HorizonKind,
     InvestmentHorizonValue,
     MinimumInvestmentValue,
     NewsSourceType,
@@ -54,6 +64,26 @@ from fundscraper.output_models import (
     TargetReturnValue,
     ValueOrigin,
 )
+
+# The version of the rules below, and of the evidence rules in
+# ``output_audit`` that read them. It is the only thing that tells a
+# reader whether an audit report describes the current understanding of
+# the data, because the file being audited can stay byte-identical while
+# what counts as a defect changes underneath it: one report of
+# ``funds.after-fast.json`` withheld 138 fields and the next report of
+# the same bytes withheld 194.
+#
+# Bump this whenever a rule is added, removed or changed in a way that
+# would alter what an audit reports. Delivery refuses any audit stamped
+# with a different value, so a stale report cannot hand a doubted value
+# over as clean.
+AUDIT_RULESET_VERSION: Final = "2026-08-12.3"
+
+
+# The shape of the audit report itself. Independent of the rules: a
+# reader parsing the report cares about this, a reader trusting its
+# verdicts cares about the one above.
+AUDIT_SCHEMA_VERSION: Final = "2"
 
 
 class ValidationCode(StrEnum):
@@ -88,6 +118,7 @@ class ValidationCode(StrEnum):
     # Investment horizon.
     IMPLAUSIBLE_HORIZON = "implausible_horizon"
     CALENDAR_YEAR_AS_HORIZON = "calendar_year_as_horizon"
+    HORIZON_BOUND_LOST = "horizon_bound_lost"
 
     # Minimum investment.
     ZERO_MINIMUM_INVESTMENT = "zero_minimum_investment"
@@ -108,6 +139,8 @@ class ValidationCode(StrEnum):
     KID_SCENARIO_AS_TARGET_RETURN = "kid_performance_scenario_as_target"
     UNRELATED_PERCENTAGE_AS_TARGET_RETURN = "unrelated_percentage_as_target_return"
     HISTORICAL_RETURN_AS_TARGET_RETURN = "historical_return_as_target_return"
+    UNKNOWN_ANNUALIZATION_FOR_ANNUAL_RATE = "unknown_annualization_for_annual_rate"
+    BENCHMARK_RETURN_AS_FIXED_RATE = "benchmark_return_as_fixed_rate"
 
     # Fees.
     COLLAPSED_FEE_RANGE = "collapsed_fee_range"
@@ -117,6 +150,7 @@ class ValidationCode(StrEnum):
     ZERO_FEE_WITHOUT_EVIDENCE = "zero_fee_without_evidence"
     ZERO_FEE_FROM_A_RANGE = "zero_fee_from_a_range"
     ZERO_FEE_NOT_SUPPORTED_BY_SOURCE = "zero_fee_not_supported_by_source"
+    ZERO_FEE_OF_ANOTHER_FEE_TYPE = "zero_fee_of_another_fee_type"
     VALUE_NOT_PRESENT_IN_EVIDENCE = "value_not_present_in_evidence"
     VALUE_FAR_FROM_FEE_LABEL = "value_far_from_fee_label"
     PERCENTAGE_DESCRIBES_INCOME_SHARE = "percentage_describes_income_share"
@@ -131,6 +165,9 @@ class ValidationCode(StrEnum):
     IMPLAUSIBLE_AUM_AMOUNT = "implausible_aum_amount"
     THOUSANDS_UNIT_NOT_APPLIED = "thousands_unit_not_applied"
     AUM_VALUE_NOT_TIED_TO_LABEL = "aum_value_not_tied_to_label"
+    CAPITAL_OF_ANOTHER_COMPANY = "capital_of_another_company"
+    CAPITAL_METRIC_CONTRADICTS_EVIDENCE = "capital_metric_contradicts_evidence"
+    NEWER_AUM_OBSERVATION_EXISTS = "newer_aum_observation_exists"
     FUTURE_AS_OF_DATE = "future_as_of_date"
     STALE_AS_OF_DATE = "stale_as_of_date"
 
@@ -149,6 +186,7 @@ class ValidationCode(StrEnum):
     PARTY_NAME_NOT_SPECIFIC = "party_name_not_specific"
     PARTY_ROLE_MISMATCH = "party_role_mismatch"
     PARTY_IS_THE_FUND_ITSELF = "party_is_the_fund_itself"
+    PARTY_NAME_CONTAINS_A_DATE = "party_name_contains_a_date"
     MALFORMED_REGISTRATION_NUMBER = "malformed_registration_number"
 
     # News.
@@ -410,7 +448,10 @@ FIELD_SPECIFICATIONS: Final[dict[str, FieldSpecification]] = {
         minimum=0.0,
         maximum=HORIZON_MAXIMUM_YEARS,
         hard_reject=(ValidationCode.CALENDAR_YEAR_AS_HORIZON,),
-        review_only=(ValidationCode.IMPLAUSIBLE_HORIZON,),
+        review_only=(
+            ValidationCode.IMPLAUSIBLE_HORIZON,
+            ValidationCode.HORIZON_BOUND_LOST,
+        ),
         notes=(
             "A duration in years, read from a recommended holding period. "
             "A calendar year or a date is never a horizon."
@@ -453,6 +494,8 @@ FIELD_SPECIFICATIONS: Final[dict[str, FieldSpecification]] = {
         ),
         review_only=(
             ValidationCode.UNUSUALLY_HIGH_TARGET_RETURN,
+            ValidationCode.UNKNOWN_ANNUALIZATION_FOR_ANNUAL_RATE,
+            ValidationCode.BENCHMARK_RETURN_AS_FIXED_RATE,
             ValidationCode.IMPLAUSIBLE_TARGET_RETURN,
             ValidationCode.ZERO_TARGET_RETURN,
             ValidationCode.COLLAPSED_TARGET_RETURN_RANGE,
@@ -476,6 +519,7 @@ FIELD_SPECIFICATIONS: Final[dict[str, FieldSpecification]] = {
             ValidationCode.IMPLAUSIBLE_FEE_RATE,
             ValidationCode.UNUSUALLY_HIGH_FEE_RATE,
             ValidationCode.FEE_AMOUNT_RATE_MISMATCH,
+            ValidationCode.ZERO_FEE_OF_ANOTHER_FEE_TYPE,
             ValidationCode.MISSING_CURRENCY,
         ),
         notes=(
@@ -495,8 +539,11 @@ FIELD_SPECIFICATIONS: Final[dict[str, FieldSpecification]] = {
         hard_reject=(
             ValidationCode.MANAGER_AUM_AS_FUND_AUM,
             ValidationCode.STATUTORY_CAPITAL_AS_AUM,
+            ValidationCode.CAPITAL_OF_ANOTHER_COMPANY,
         ),
         review_only=(
+            ValidationCode.CAPITAL_METRIC_CONTRADICTS_EVIDENCE,
+            ValidationCode.NEWER_AUM_OBSERVATION_EXISTS,
             ValidationCode.PER_SHARE_VALUE_AS_AUM,
             ValidationCode.IMPLAUSIBLY_SMALL_AUM,
             ValidationCode.IMPLAUSIBLY_LARGE_AUM,
@@ -524,6 +571,7 @@ FIELD_SPECIFICATIONS: Final[dict[str, FieldSpecification]] = {
         review_only=(
             ValidationCode.PARTY_NAME_NOT_SPECIFIC,
             ValidationCode.PARTY_IS_THE_FUND_ITSELF,
+            ValidationCode.PARTY_NAME_CONTAINS_A_DATE,
             ValidationCode.MALFORMED_REGISTRATION_NUMBER,
         ),
         notes=(
@@ -545,6 +593,7 @@ FIELD_SPECIFICATIONS: Final[dict[str, FieldSpecification]] = {
         review_only=(
             ValidationCode.PARTY_NAME_NOT_SPECIFIC,
             ValidationCode.PARTY_IS_THE_FUND_ITSELF,
+            ValidationCode.PARTY_NAME_CONTAINS_A_DATE,
             ValidationCode.MALFORMED_REGISTRATION_NUMBER,
         ),
         notes=(
@@ -563,12 +612,16 @@ FIELD_SPECIFICATIONS: Final[dict[str, FieldSpecification]] = {
             ValidationCode.STATUTORY_CAPITAL_AS_AUM,
             ValidationCode.MANAGER_AUM_AS_FUND_AUM,
             ValidationCode.DUPLICATE_DATES_IN_SERIES,
+            ValidationCode.CAPITAL_OF_ANOTHER_COMPANY,
         ),
         review_only=(
             ValidationCode.PER_SHARE_VALUE_AS_AUM,
             ValidationCode.IMPLAUSIBLE_AUM_AMOUNT,
             ValidationCode.IMPLAUSIBLY_LARGE_AUM,
+            ValidationCode.IMPLAUSIBLY_SMALL_AUM,
+            ValidationCode.THOUSANDS_UNIT_NOT_APPLIED,
             ValidationCode.MIXED_METRICS_IN_SERIES,
+            ValidationCode.FUTURE_AS_OF_DATE,
         ),
         notes=(
             "Dated fund-level capital figures. Every observation carries "
@@ -607,6 +660,9 @@ FIELD_SPECIFICATIONS: Final[dict[str, FieldSpecification]] = {
             ValidationCode.MIXED_SHARE_CLASSES_IN_SERIES,
             ValidationCode.MIXED_CURRENCIES_IN_SERIES,
             ValidationCode.PER_SHARE_VALUE_AS_AUM,
+            ValidationCode.IMPLAUSIBLY_SMALL_AUM,
+            ValidationCode.THOUSANDS_UNIT_NOT_APPLIED,
+            ValidationCode.FUTURE_AS_OF_DATE,
         ),
         notes=(
             "One series per measured quantity, share class and currency. "
@@ -1095,6 +1151,8 @@ def validate_target_return(
 
     findings.extend(_target_return_magnitude_findings(candidates))
 
+    findings.extend(_annualization_findings(value))
+
     return findings
 
 
@@ -1245,6 +1303,193 @@ def _url_states_a_kid(
     return any(marker in normalized for marker in _KID_URL_MARKERS)
 
 
+def validate_horizon_wording(
+    value: InvestmentHorizonValue,
+    *,
+    quote: str | None,
+) -> list[ValidationFinding]:
+    """
+    Refuse a horizon whose source stated a bound the value threw away.
+
+    "Investicni horizont: min. 3 roky" says three years is the least the
+    fund will accept. Delivered as an exact three years it tells an
+    investor the opposite of what the fund meant — that three years is
+    the plan rather than the floor. One delivered output carried exactly
+    that, and it was the extraction, not the source, that lost the word.
+    """
+
+    if not quote:
+        return []
+
+    normalized = normalize_search_text(quote)
+
+    if classify_horizon_kind(normalized) is HorizonKind.MINIMUM:
+        if value.kind is not HorizonKind.MINIMUM:
+            return [
+                ValidationFinding(
+                    code=ValidationCode.HORIZON_BOUND_LOST,
+                    severity=ValidationSeverity.REVIEW,
+                    detail=(
+                        f"The source states the horizon as a minimum, and the "
+                        f"value is stored as {value.kind.value!r}, so the "
+                        "least the fund accepts reads as the period it "
+                        "recommends."
+                    ),
+                )
+            ]
+
+        return []
+
+    if states_a_horizon_range(normalized) and value.kind is not HorizonKind.RANGE:
+        return [
+            ValidationFinding(
+                code=ValidationCode.HORIZON_BOUND_LOST,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    "The source states the horizon as a span of years and the "
+                    f"value is stored as {value.kind.value!r}, so one end of "
+                    "the span stands for the whole of it."
+                ),
+            )
+        ]
+
+    if any(marker in normalized for marker in HORIZON_MAXIMUM_MARKERS):
+        return [
+            ValidationFinding(
+                code=ValidationCode.HORIZON_BOUND_LOST,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    "The source states the horizon as an upper bound, which "
+                    "the delivered value has no way to express."
+                ),
+            )
+        ]
+
+    return []
+
+
+def validate_capital_metric_wording(
+    *,
+    metric_type: AumMetricType,
+    quote: str | None,
+) -> list[ValidationFinding]:
+    """
+    Refuse a capital figure whose evidence names a different quantity.
+
+    Fund capital, net assets, a net asset value and equity are four
+    different lines of the same statement, and a fund's own report names
+    which one it is stating. One delivered output read "Fondovy kapital
+    Spolecnosti dosahl ... 52 012 tis. Kc" and stored it as equity, while
+    the same figure on the same day sat in the fund's own history as
+    fund capital.
+    """
+
+    if not quote:
+        return []
+
+    stated = classify_capital_metric(normalize_search_text(quote))
+
+    if stated is None or stated is metric_type:
+        return []
+
+    # The generic label is not evidence against a specific one: a report
+    # writing "aktiva ve sprave" while the value is stored as the assets
+    # of the fund says the same thing twice.
+    if {stated, metric_type} <= {
+        AumMetricType.ASSETS_UNDER_MANAGEMENT,
+        AumMetricType.FUND_AUM,
+    }:
+        return []
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.CAPITAL_METRIC_CONTRADICTS_EVIDENCE,
+            severity=ValidationSeverity.REVIEW,
+            detail=(
+                f"The evidence names {stated.value!r} and the value is "
+                f"stored as {metric_type.value!r}. The two are different "
+                "lines of a statement and are not interchangeable."
+            ),
+        )
+    ]
+
+
+def validate_return_wording(
+    value: TargetReturnValue,
+    *,
+    quote: str | None,
+) -> list[ValidationFinding]:
+    """
+    Refuse a fixed rate read out of a rate that moves with a benchmark.
+
+    "zhodnoceni 2TR + 1 % p.a." promises the two-week repo rate plus one
+    point. Delivered as a target of 1 % a year it is not an approximation
+    of that promise but a different and much smaller one, and nothing in
+    the stored model can hold the reference rate.
+    """
+
+    if not quote:
+        return []
+
+    if value.value_percent_pa is None and value.minimum_percent_pa is None:
+        return []
+
+    normalized = normalize_search_text(quote)
+
+    if not states_benchmark_linked_return(normalized):
+        return []
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.BENCHMARK_RETURN_AS_FIXED_RATE,
+            severity=ValidationSeverity.REJECT,
+            detail=(
+                "The source states a return measured against a reference "
+                "rate, so the stored percentage is the spread alone and "
+                "not a rate the fund targets."
+            ),
+        )
+    ]
+
+
+def _annualization_findings(
+    value: TargetReturnValue,
+) -> list[ValidationFinding]:
+    """
+    Refuse a rate stored per annum that no source ever called annual.
+
+    Every percentage of this field is delivered in a property whose name
+    ends in ``_percent_pa``. A reader takes that literally, so a figure
+    the source only ever wrote as a bare "10 %" is being given a period
+    it may not have. Twenty-one delivered target returns carried a
+    percentage with an unknown annualization.
+    """
+
+    rates = (
+        value.value_percent_pa,
+        value.minimum_percent_pa,
+        value.maximum_percent_pa,
+    )
+
+    if all(rate is None for rate in rates):
+        return []
+
+    if value.annualization is not Annualization.UNKNOWN:
+        return []
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.UNKNOWN_ANNUALIZATION_FOR_ANNUAL_RATE,
+            severity=ValidationSeverity.REVIEW,
+            detail=(
+                "The target return is stored as a rate per annum, but "
+                "nothing in the source establishes the period it covers, "
+                "so it may be a return over the whole investment horizon."
+            ),
+        )
+    ]
+
+
 def validate_assets_under_management(
     value: AssetsUnderManagementValue,
     *,
@@ -1335,6 +1580,189 @@ def _capital_metric_findings(
     return []
 
 
+# The wording that attaches capital to a company. A fund's own report
+# describes the companies it holds, and "vlastni kapital spolecnosti
+# X s.r.o." reads exactly like the fund's own capital to a pattern that
+# only looks for an amount.
+_CAPITAL_SUBJECT_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        "fond",
+        "fondu",
+        "fonde",
+        "fondem",
+        "fondy",
+        "podfond",
+        "podfondu",
+        "spolecnost",
+        "spolecnosti",
+        "fund",
+        "subfund",
+    }
+)
+
+
+# Tokens a legal form contributes to every company alike, so they never
+# distinguish one company from another.
+_COMPANY_FORM_TOKENS: Final[frozenset[str]] = frozenset(
+    {
+        "spolecnost",
+        "spolecnosti",
+        "sro",
+        "spol",
+        "sicav",
+        "investicni",
+    }
+)
+
+
+def _identity_tokens(
+    name: str,
+) -> set[str]:
+    """
+    Return the words that distinguish one company from another.
+
+    Both sides of the comparison are reduced the same way, which they
+    were not: the fund kept only words of four letters or more while a
+    candidate kept everything from three, so a three-letter brand prefix
+    counted as a difference in one direction and a match in the other.
+
+    Short words are dropped on purpose. A shared prefix like "EBM" is
+    branding, not identity, and "EBM Partner a.s." is a different legal
+    entity from "EBM Real Estate SICAV, a.s." — the capital of one is
+    not the capital of the other.
+    """
+
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]{4,}", fold_diacritics(name))
+        if token not in _COMPANY_FORM_TOKENS
+    }
+
+
+def _written_amount_forms(
+    amount: float,
+) -> set[str]:
+    """Return how an amount can appear in a Czech document."""
+
+    forms: set[str] = set()
+
+    for scale in (1, 1_000, 1_000_000, 1_000_000_000):
+        if amount % scale:
+            continue
+
+        scaled = amount / scale
+
+        if scaled <= 0 or scaled != int(scaled):
+            continue
+
+        grouped = f"{int(scaled):,}".replace(",", " ")
+
+        forms.add(grouped)
+        forms.add(grouped.replace(" ", " "))
+        forms.add(grouped.replace(" ", ""))
+
+        # A Czech annual report groups thousands with a full stop as
+        # readily as with a space: "31.596 tis. Kc" is the same figure
+        # as "31 596 tis. Kc", and one delivered value escaped this rule
+        # only because of the separator its report happened to use.
+        forms.add(grouped.replace(" ", "."))
+
+    return forms
+
+
+def validate_capital_attribution(
+    *,
+    amounts: Sequence[float],
+    quote: str | None,
+    fund_name: str,
+) -> list[ValidationFinding]:
+    """
+    Refuse capital that the evidence attaches to a different company.
+
+    A qualified investor fund reports the companies it holds, so its
+    annual report is full of other companies' capital. One delivered
+    fund carried 119 350 000 000 CZK of "assets", read from "snizen
+    vlastni kapital spolecnosti MS Trnita 1 s.r.o. o 119 350 mil. Kc" —
+    the conversion was right and the owner was not.
+
+    The rule only speaks when the evidence is unambiguous: the amount has
+    to be findable in the quote, another company has to stand between the
+    start of the quote and that amount, and neither the fund nor a plain
+    word for the fund may stand any closer to it. Anything less stays
+    silent, because refusing a value needs better evidence than doubting
+    one.
+    """
+
+    if not quote:
+        return []
+
+    plain = quote.replace(" ", " ").replace(" ", " ")
+
+    fund_tokens = _identity_tokens(fund_name)
+
+    for amount in amounts:
+        positions = [
+            plain.find(form) for form in _written_amount_forms(amount) if plain.find(form) >= 0
+        ]
+
+        if not positions:
+            continue
+
+        end = min(positions)
+
+        owner = _nearest_other_company(
+            text=plain[:end],
+            fund_tokens=fund_tokens,
+        )
+
+        if owner is None:
+            continue
+
+        between = set(fold_diacritics(plain[owner[0] : end]).split())
+
+        if between & _CAPITAL_SUBJECT_WORDS or between & fund_tokens:
+            continue
+
+        return [
+            ValidationFinding(
+                code=ValidationCode.CAPITAL_OF_ANOTHER_COMPANY,
+                severity=ValidationSeverity.REJECT,
+                detail=(
+                    f"The evidence attaches {amount:,.0f} to "
+                    f"{owner[1]!r}, which is not {fund_name}. The capital of "
+                    "a company the fund holds is not the capital of the fund."
+                ),
+            )
+        ]
+
+    return []
+
+
+def _nearest_other_company(
+    *,
+    text: str,
+    fund_tokens: set[str],
+) -> tuple[int, str] | None:
+    """Return the end position and name of the last company that is not the fund."""
+
+    from fundscraper.field_definitions import COMPANY_NAME_PATTERN
+
+    found: tuple[int, str] | None = None
+
+    for match in COMPANY_NAME_PATTERN.finditer(text):
+        name = match.group("name").strip()
+
+        tokens = _identity_tokens(name)
+
+        if tokens and not (tokens & fund_tokens):
+            found = (
+                match.end(),
+                name,
+            )
+
+    return found
+
+
 def _capital_magnitude_findings(
     *,
     amount: float,
@@ -1416,6 +1844,60 @@ def _as_of_findings(
     return []
 
 
+def _future_dated_findings(
+    *,
+    dates: Sequence[date],
+    subject: str,
+    today: date | None,
+) -> list[ValidationFinding]:
+    """
+    Refuse a dated series that reports days that have not happened.
+
+    A fund publishes what its assets were, not what they will be. An
+    observation dated in the future is a projection read as a measurement
+    or a date parsed from the wrong column, and one delivered series
+    carried values for 2026-12-31 and 2027-12-31 as if they had been
+    recorded.
+    """
+
+    moment = today or datetime.now(UTC).date()
+
+    ahead = sorted({item for item in dates if item > moment})
+
+    if not ahead:
+        return []
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.FUTURE_AS_OF_DATE,
+            severity=ValidationSeverity.REVIEW,
+            detail=(
+                f"The {subject} reports "
+                + ", ".join(item.isoformat() for item in ahead[:3])
+                + ", which lie in the future, so they cannot be measurements."
+            ),
+        )
+    ]
+
+
+# A company name never opens with a date. Both Czech spellings appear in
+# the delivered output: "4. 10. 2021 AVANT investicni spolecnost, a.s."
+# from a statute effective-date line and "2025 investicni spolecnost"
+# from a copyright footer.
+_LEADING_DATE_PATTERN: Final = re.compile(
+    r"""
+    ^\s*
+    (?:
+        \d{1,2}\s*[./]\s*\d{1,2}\s*[./]\s*\d{4}    # 4. 10. 2021
+        |
+        (?:19|20)\d{2}                                # 2025
+    )
+    (?![\d])
+    """,
+    re.VERBOSE,
+)
+
+
 def validate_party(
     *,
     party: FundParty,
@@ -1427,7 +1909,7 @@ def validate_party(
     # Imported here because the field definitions import nothing from
     # this module and a top-level import would still be a cycle risk as
     # the vocabulary grows.
-    from fundscraper.field_definitions import is_generic_company_name
+    from fundscraper.field_definitions import clean_party_name, is_generic_company_name
 
     findings: list[ValidationFinding] = []
 
@@ -1453,6 +1935,23 @@ def validate_party(
                 ),
             )
         )
+    elif clean_party_name(name) is None:
+        # The rule the extraction applies, applied again to what was
+        # delivered. One output holds "3.1 Administraci Fondu provadi
+        # Investicni spolecnost" as an administrator: a numbered clause
+        # of a statute, kept whole because the sentence it names the
+        # company in was not recognised as a sentence.
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.PARTY_NAME_NOT_SPECIFIC,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The {expected_role.value} is stored as {name!r}, which "
+                    "is a line of a document rather than the name of a "
+                    "company."
+                ),
+            )
+        )
 
     if party.role is not expected_role:
         findings.append(
@@ -1461,6 +1960,20 @@ def validate_party(
                 severity=ValidationSeverity.REJECT,
                 detail=(
                     f"The {expected_role.value} field carries a party of role {party.role.value!r}."
+                ),
+            )
+        )
+
+    if _LEADING_DATE_PATTERN.match(name):
+        findings.append(
+            ValidationFinding(
+                code=ValidationCode.PARTY_NAME_CONTAINS_A_DATE,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The {expected_role.value} is stored as {name!r}, which "
+                    "opens with a date. The line of a statute or a register "
+                    "extract was captured together with the company it "
+                    "names, so the stored name is not the legal name."
                 ),
             )
         )
@@ -1491,10 +2004,20 @@ def validate_party(
 
 def validate_capital_observations(
     observations: Sequence[CapitalObservation],
+    *,
+    today: date | None = None,
 ) -> list[ValidationFinding]:
     """Check a series of capital figures reported as the fund assets."""
 
     findings: list[ValidationFinding] = []
+
+    findings.extend(
+        _future_dated_findings(
+            dates=[observation.as_of for observation in observations],
+            subject="capital series",
+            today=today,
+        )
+    )
 
     metrics = {observation.metric_type for observation in observations}
 
@@ -1662,10 +2185,20 @@ def validate_annual_returns(
 
 def validate_historical_series(
     series: Sequence[HistoricalValueSeries],
+    *,
+    today: date | None = None,
 ) -> list[ValidationFinding]:
     """Check that every value series measures one thing consistently."""
 
     findings: list[ValidationFinding] = []
+
+    findings.extend(
+        _future_dated_findings(
+            dates=[observation.as_of for item in series for observation in item.observations],
+            subject="value series",
+            today=today,
+        )
+    )
 
     identities = Counter(
         (
@@ -1754,31 +2287,83 @@ _FUND_LEVEL_SERIES_TYPES: Final[frozenset[HistoricalValueType]] = frozenset(
 def _per_share_series_findings(
     series: HistoricalValueSeries,
 ) -> list[ValidationFinding]:
+    """
+    Measure a fund-level series against the magnitudes a fund really has.
+
+    The same two rungs the single assets figure is measured against, so a
+    capital of 0.5 CZK and a capital of 24 245 CZK are both named, and
+    named differently: the first is the price of one investment share,
+    the second an annual report published "v tis. Kc" whose multiplier
+    was never applied. Delivered series carried both.
+    """
+
     if series.value_type not in _FUND_LEVEL_SERIES_TYPES:
         return []
 
-    small = [
+    per_share = [
         observation
         for observation in series.observations
         if observation.value < PER_SHARE_VALUE_LIMIT
     ]
 
-    if not small:
-        return []
+    if per_share:
+        return [
+            ValidationFinding(
+                code=ValidationCode.PER_SHARE_VALUE_AS_AUM,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The {series.value_type.value} series holds "
+                    f"{len(per_share)} value(s) below "
+                    f"{PER_SHARE_VALUE_LIMIT:,.0f} {series.currency}, such as "
+                    f"{per_share[0].value:g}, which are values per investment "
+                    "share rather than the capital of the fund."
+                ),
+            )
+        ]
 
-    return [
-        ValidationFinding(
-            code=ValidationCode.PER_SHARE_VALUE_AS_AUM,
-            severity=ValidationSeverity.REVIEW,
-            detail=(
-                f"The {series.value_type.value} series holds "
-                f"{len(small)} value(s) below "
-                f"{PER_SHARE_VALUE_LIMIT:,.0f} {series.currency}, such as "
-                f"{small[0].value:g}, which are values per investment share "
-                "rather than the capital of the fund."
-            ),
-        )
+    small = [
+        observation
+        for observation in series.observations
+        if observation.value < AUM_IMPLAUSIBLE_AMOUNT
     ]
+
+    if small:
+        return [
+            ValidationFinding(
+                code=ValidationCode.IMPLAUSIBLY_SMALL_AUM,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The {series.value_type.value} series holds "
+                    f"{len(small)} value(s) below "
+                    f"{AUM_IMPLAUSIBLE_AMOUNT:,.0f} {series.currency}, such as "
+                    f"{small[0].value:g}, which is far below what a fund of "
+                    "this kind holds. Czech statements report amounts in "
+                    "thousands, so the multiplier was probably lost."
+                ),
+            )
+        ]
+
+    large = [
+        observation
+        for observation in series.observations
+        if observation.value > AUM_IMPLAUSIBLY_LARGE_AMOUNT
+    ]
+
+    if large:
+        return [
+            ValidationFinding(
+                code=ValidationCode.IMPLAUSIBLY_LARGE_AUM,
+                severity=ValidationSeverity.REVIEW,
+                detail=(
+                    f"The {series.value_type.value} series holds "
+                    f"{large[0].value:,.0f} {series.currency}, larger than the "
+                    "whole Czech qualified investor sector, so a unit "
+                    "multiplier was probably applied twice."
+                ),
+            )
+        ]
+
+    return []
 
 
 def validate_news_items(
@@ -2188,6 +2773,8 @@ def validate_cross_fields(
 
     findings.extend(_aum_against_history(record))
 
+    findings.extend(_aum_superseded_by_history(record))
+
     findings.extend(_aum_against_per_share_values(record))
 
     findings.extend(_target_return_against_history(record))
@@ -2195,6 +2782,58 @@ def validate_cross_fields(
     findings.extend(_party_roles(record))
 
     return findings
+
+
+def _aum_superseded_by_history(
+    record: FundRecordView,
+) -> list[ValidationFinding]:
+    """
+    Refuse a current assets figure the fund's own history has outgrown.
+
+    This field is what the fund holds now. One delivered output reported
+    a net asset value of 125.7 million CZK for 31 December 2023 as the
+    current assets of a fund whose own history already held 328 million
+    for 31 December 2025 — both read from the fund's own newsletters,
+    both fund-level, and the older one delivered.
+
+    Only the fund's own dated observations are compared, and only ones of
+    a fund-level metric, so nothing here depends on today's date or on
+    how old a value is allowed to be. A figure is refused for being
+    superseded, never for being old: the observation that supersedes it
+    stays in ``aum_history`` and so does this one.
+    """
+
+    value = record.assets_under_management
+
+    if value is None:
+        return []
+
+    newer = [
+        observation
+        for observation in record.aum_observations
+        if observation.metric_type not in NON_FUND_CAPITAL_METRICS
+        and observation.as_of > value.as_of
+    ]
+
+    if not newer:
+        return []
+
+    latest = max(newer, key=lambda observation: observation.as_of)
+
+    return [
+        ValidationFinding(
+            code=ValidationCode.NEWER_AUM_OBSERVATION_EXISTS,
+            severity=ValidationSeverity.REVIEW,
+            detail=(
+                f"The delivered assets are dated {value.as_of.isoformat()} "
+                f"while the fund's own history holds "
+                f"{latest.amount:,.0f} {latest.currency} "
+                f"({latest.metric_type.value}) for "
+                f"{latest.as_of.isoformat()}, so the current figure has "
+                "been superseded."
+            ),
+        )
+    ]
 
 
 def _aum_against_history(

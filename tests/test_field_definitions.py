@@ -59,6 +59,45 @@ def test_strips_the_sentence_that_introduced_a_company() -> None:
     )
 
 
+def test_drops_a_date_that_a_connective_hid_in_front_of_the_company() -> None:
+    """The nine contaminated party values all read "je pocinaje <date> AVANT ...".
+
+    The date was stripped before the leading connective was, so once "pocinaje" was gone the
+    date stood at the front of the name and nothing removed it any more.
+    """
+
+    assert clean_party_name("počínaje 10. 05. 2018 AVANT investiční společnost, a.s.") == (
+        "AVANT investiční společnost, a.s."
+    )
+
+    assert clean_party_name("počínaje 21.12.2017 AVANT investiční společnost, a. s.") == (
+        "AVANT investiční společnost, a. s."
+    )
+
+    assert clean_party_name("s účinností od 4. 10. 2021 AVANT investiční společnost, a.s.") == (
+        "AVANT investiční společnost, a.s."
+    )
+
+    assert clean_party_name("počínaje 29. ledna 2021 AVANT investiční společnost, a.s.") == (
+        "AVANT investiční společnost, a.s."
+    )
+
+
+def test_keeps_the_digits_of_a_company_named_with_them() -> None:
+    """The neighbouring value that must keep passing: a name that opens with digits."""
+
+    assert clean_party_name("3M FUND MSI SICAV a.s.") == "3M FUND MSI SICAV a.s."
+
+    assert clean_party_name("4stavební a.s.") == "4stavební a.s."
+
+    assert clean_party_name("2N TELEKOMUNIKACE a.s.") == "2N TELEKOMUNIKACE a.s."
+
+    # a bare year in front of a name is a date; a year inside one is not
+    assert clean_party_name("2021 AVANT investiční společnost, a.s.") == (
+        "AVANT investiční společnost, a.s."
+    )
+
+
 def test_refuses_a_name_that_is_only_a_legal_form() -> None:
     assert clean_party_name("Investiční společnost") is None
 
@@ -278,3 +317,55 @@ def test_separates_a_news_listing_from_an_article() -> None:
     assert is_news_article_path("/aktuality/vyrocni-zprava-2024")
 
     assert not is_news_path("/dokumenty/statut.pdf")
+
+
+def test_capital_metric_follows_the_label_nearest_the_value() -> None:
+    """
+    The standard annual report puts a heading above the figure it does not name.
+
+    "a) Základní kapitál Fondu" is a section heading; the line beneath it states
+    "Výše fondového kapitálu: 221 913 tis. Kč", which is the fund's capital and a
+    legitimate assets metric. The classifier returned the first label in its own
+    declaration order, so the heading won and the figure was filed as registered
+    capital — a metric that may never stand in for assets. 14 of the 341 funds
+    lost a genuine assets figure that way.
+    """
+
+    from fundscraper.field_definitions import classify_capital_metric
+    from fundscraper.output_models import AumMetricType
+
+    normalized = normalize_search_text(
+        "a) Zakladni kapital Fondu Vyse fondoveho kapitalu: 221 913 tis. Kc "
+        "(k poslednimu dni Ucetniho obdobi)"
+    )
+
+    assert classify_capital_metric(normalized) is AumMetricType.FUND_CAPITAL
+
+
+def test_registered_capital_alone_is_still_registered_capital() -> None:
+    """The guard that keeps statutory capital out of assets must survive."""
+
+    from fundscraper.field_definitions import classify_capital_metric
+    from fundscraper.output_models import AumMetricType
+
+    normalized = normalize_search_text("Zapisovany zakladni kapital Fondu cini 2 000 000 Kc")
+
+    assert classify_capital_metric(normalized) is AumMetricType.REGISTERED_CAPITAL
+
+
+def test_a_later_stricter_label_still_wins() -> None:
+    """
+    Ambiguity resolves towards refusal, not towards a value.
+
+    When the fund-capital wording comes first and a registered-capital label
+    stands next to the figure, the stricter metric has to win.
+    """
+
+    from fundscraper.field_definitions import classify_capital_metric
+    from fundscraper.output_models import AumMetricType
+
+    normalized = normalize_search_text(
+        "Fondovy kapital Fondu je tvoren takto: zapisovany zakladni kapital 2 000 000 Kc"
+    )
+
+    assert classify_capital_metric(normalized) is AumMetricType.REGISTERED_CAPITAL

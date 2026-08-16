@@ -152,3 +152,92 @@ def test_writes_and_loads_parsed_document(
 
     assert loaded == parsed
     assert output_path.exists()
+
+
+# The parameter block of a fund homepage, as a real site publishes it:
+# a two-column table whose label and value sit in sibling cells.
+FUND_PARAMETER_TABLE = """
+<!doctype html>
+<html>
+  <body>
+    <h2>Zakladni parametry</h2>
+    <table>
+      <tr>
+        <td><span><b>Minimalni investice klienta</b></span></td>
+        <td><span>1 mil. Kc</span></td>
+      </tr>
+      <tr>
+        <td><b>Vstupni poplatek</b></td>
+        <td>az 3 %</td>
+      </tr>
+      <tr>
+        <td><b>Vystupni poplatek</b></td>
+        <td>0 % po 3 letech, 5 % do 3 let</td>
+      </tr>
+    </table>
+  </body>
+</html>
+"""
+
+
+def test_html_table_rows_are_kept_as_a_grid() -> None:
+    """
+    A key/value block flattened to text loses which value belongs to which label.
+
+    The fee extractor pairs a rate with its label by row, so an HTML page
+    that publishes its parameters as a table produced no fee at all while
+    the same table in a PDF produced one.
+    """
+
+    result = parse_document(
+        body=FUND_PARAMETER_TABLE.encode("utf-8"),
+        content_type="text/html",
+        url="https://example.com/",
+    )
+
+    tables = [table for _, table in result.iter_tables()]
+
+    assert len(tables) == 1
+
+    assert tables[0].rows == (
+        ("Minimalni investice klienta", "1 mil. Kc"),
+        ("Vstupni poplatek", "az 3 %"),
+        ("Vystupni poplatek", "0 % po 3 letech, 5 % do 3 let"),
+    )
+
+
+def test_html_layout_table_without_a_row_relationship_is_not_kept() -> None:
+    """A single-column table carries no label-to-value relationship."""
+
+    body = b"""
+    <!doctype html>
+    <html><body>
+      <table><tr><td>Only one column</td></tr><tr><td>and another</td></tr></table>
+    </body></html>
+    """
+
+    result = parse_document(
+        body=body,
+        content_type="text/html",
+        url="https://example.com/",
+    )
+
+    assert result.table_count == 0
+
+
+def test_html_tables_survive_the_parsed_cache() -> None:
+    """The grid has to reach extraction, which reads the stored copy."""
+
+    from fundscraper.document_parser import ParsedDocument
+
+    result = parse_document(
+        body=FUND_PARAMETER_TABLE.encode("utf-8"),
+        content_type="text/html",
+        url="https://example.com/",
+    )
+
+    reloaded = ParsedDocument.from_json_dict(result.to_json_dict())
+
+    assert [table.rows for _, table in reloaded.iter_tables()] == [
+        table.rows for _, table in result.iter_tables()
+    ]

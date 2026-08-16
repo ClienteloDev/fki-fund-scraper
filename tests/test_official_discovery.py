@@ -17,6 +17,7 @@ from fundscraper.models import FundInput
 from fundscraper.official_discovery import (
     REJECTED_OFF_DOMAIN,
     REJECTED_OTHER_FUND,
+    REJECTED_OTHER_FUND_DOCUMENT,
     REJECTED_ROBOTS,
     OfficialDiscoveryResult,
     discover_official_sources,
@@ -850,3 +851,191 @@ def test_any_one_of_the_wanted_document_types_answers_the_pass(
     assert result.is_sufficient
 
     assert result.missing_document_groups == ()
+
+
+# ---------------------------------------------------------------------------
+# A manager site that runs many funds
+# ---------------------------------------------------------------------------
+
+
+# A fund whose only known address is the bare site of its manager. The
+# benchmark found five of these; between them they downloaded and parsed
+# 224 documents of other funds and delivered nothing.
+MANAGER_HOSTED_ONLY = FundInput(
+    name="Patronus třicátá osmá SICAV a.s.",
+    web="https://www.amista.cz/",
+)
+
+
+MULTI_FUND_MANAGER_PAGES: dict[str, tuple[bytes, str]] = {
+    "www.amista.cz/": (
+        _html(
+            """
+            <a href="/files/carduus/2025-07-01-statut-adversum-sicav-a.s.pdf">Statut</a>
+            <a href="/files/alethes_podfond_value/sdeleni-klicovych-informaci.pdf">KID</a>
+            <a href="/files/sdeleni-klicovych-informaci-2026.pdf">Sdělení klíčových informací</a>
+            <a href="/files/2026-vyrocni-zprava.pdf">Výroční zpráva</a>
+            <a href="/files/informace-pro-investory.pdf">Informace pro investory</a>
+            <a href="/files/patronus-tricata-osma/statut-fondu.pdf">Statut fondu</a>
+            """
+        ),
+        "text/html",
+    ),
+}
+
+
+def test_a_document_naming_another_fund_is_refused_before_download(
+    tmp_path: Path,
+) -> None:
+    """
+    The address says whose document it is, so nothing has to be fetched.
+
+    "statut-adversum-sicav-a.s.pdf" on the site of a manager that runs
+    dozens of funds is the statute of Adversum, whatever page linked it.
+    """
+
+    result = _run(
+        fund=MANAGER_HOSTED_ONLY,
+        pages=MULTI_FUND_MANAGER_PAGES,
+        tmp_path=tmp_path,
+    )
+
+    accepted = {document.url for document in result.documents}
+
+    assert "https://www.amista.cz/files/carduus/2025-07-01-statut-adversum-sicav-a.s.pdf" not in (
+        accepted
+    )
+
+    refused = {entry.url: entry.rejection_reason for entry in result.entries if not entry.accepted}
+
+    assert (
+        refused.get("https://www.amista.cz/files/carduus/2025-07-01-statut-adversum-sicav-a.s.pdf")
+        == REJECTED_OTHER_FUND
+    )
+
+
+def test_a_fund_specific_document_needs_identity_on_a_multi_fund_site(
+    tmp_path: Path,
+) -> None:
+    """
+    A statute belongs to exactly one fund, and this one names none.
+
+    Before this rule a bare manager host counted as the fund's own site,
+    so every key information document and annual report on it was taken
+    as this fund's own.
+    """
+
+    result = _run(
+        fund=MANAGER_HOSTED_ONLY,
+        pages=MULTI_FUND_MANAGER_PAGES,
+        tmp_path=tmp_path,
+    )
+
+    refused = {entry.url: entry.rejection_reason for entry in result.entries if not entry.accepted}
+
+    for url in (
+        "https://www.amista.cz/files/sdeleni-klicovych-informaci-2026.pdf",
+        "https://www.amista.cz/files/2026-vyrocni-zprava.pdf",
+    ):
+        assert refused.get(url) == REJECTED_OTHER_FUND_DOCUMENT, url
+
+    # One that names a different fund outright is caught by the older
+    # rule and keeps its own, more specific reason.
+    assert (
+        refused.get(
+            "https://www.amista.cz/files/alethes_podfond_value/sdeleni-klicovych-informaci.pdf"
+        )
+        == REJECTED_OTHER_FUND
+    )
+
+
+def test_a_generic_manager_document_is_still_accepted(
+    tmp_path: Path,
+) -> None:
+    """
+    A notice to investors covers every fund the manager runs.
+
+    The absence of this fund's name is not evidence against it, so the
+    identity rule must not refuse it.
+    """
+
+    result = _run(
+        fund=MANAGER_HOSTED_ONLY,
+        pages=MULTI_FUND_MANAGER_PAGES,
+        tmp_path=tmp_path,
+    )
+
+    accepted = {document.url for document in result.documents}
+
+    assert "https://www.amista.cz/files/informace-pro-investory.pdf" in accepted
+
+
+def test_the_document_of_the_requested_fund_is_accepted(
+    tmp_path: Path,
+) -> None:
+    """Only the document that names this fund survives the page."""
+
+    result = _run(
+        fund=MANAGER_HOSTED_ONLY,
+        pages=MULTI_FUND_MANAGER_PAGES,
+        tmp_path=tmp_path,
+    )
+
+    accepted = {document.url for document in result.documents}
+
+    assert "https://www.amista.cz/files/patronus-tricata-osma/statut-fondu.pdf" in accepted
+
+    statutes = {
+        document.url
+        for document in result.documents
+        if document.document_type is DocumentType.STATUTE
+    }
+
+    assert statutes == {"https://www.amista.cz/files/patronus-tricata-osma/statut-fondu.pdf"}
+
+
+def test_a_fund_on_its_own_domain_keeps_every_document(
+    tmp_path: Path,
+) -> None:
+    """
+    The rule must not touch a fund that owns its website.
+
+    Its host names no manager, so a statute that names no fund is still
+    its own.
+    """
+
+    own_domain = FundInput(
+        name="Rezidento Alfa SICAV, a.s.",
+        web="https://www.rezidentoalfa.cz",
+    )
+
+    pages = {
+        "www.rezidentoalfa.cz/": (
+            _html(
+                """
+                <a href="/dokumenty/statut-fondu.pdf">Statut</a>
+                <a href="/dokumenty/sdeleni-klicovych-informaci.pdf">KID</a>
+                <a href="/dokumenty/vyrocni-zprava-2024.pdf">Výroční zpráva 2024</a>
+                """
+            ),
+            "text/html",
+        ),
+    }
+
+    result = _run(
+        fund=own_domain,
+        pages=pages,
+        tmp_path=tmp_path,
+    )
+
+    found = {document.document_type for document in result.documents}
+
+    assert DocumentType.STATUTE in found
+
+    assert DocumentType.PRIIPS_KID in found
+
+    assert DocumentType.ANNUAL_REPORT in found
+
+    assert not [
+        entry for entry in result.entries if entry.rejection_reason == REJECTED_OTHER_FUND_DOCUMENT
+    ]

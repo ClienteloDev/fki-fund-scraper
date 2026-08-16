@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path("funds.enriched.json"),
+        default=Path("data/output/funds.full.json"),
         help="Enriched output to audit.",
     )
     parser.add_argument(
