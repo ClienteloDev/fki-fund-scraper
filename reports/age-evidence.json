@@ -1,0 +1,1080 @@
+{
+ "PRIME IMMO SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2025-07-17/2025-12-31"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   "ní období fondu).\"}], \"scoped_not_counted\": [], \"not_applied\": [{\"field\": \"aum_history\", \"reason\": \"První účetní období fondu (17. 7. – 31. 12. 2025); srovnávací sloupec je v celé zprávě N/A.\"}, {\"field\": \"annual_retur",
+   "{\"fund\": \"PRIME IMMO SICAV a.s.\", \"canonical_index\": 211, \"field\": \"aum_history\", \"reason\": \"První účetní období fondu (17. 7. – 31. 12. 2025); srovnávací sloupec je v celé zprávě N/A.\"}"
+  ]
+ },
+ "Vista SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2025-06-26/2025-12-31"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   "u“: NAV Podfondu 2 721 820 tis. Kč k poslednímu dni Účetního období (srovnávací sloupec N/A – jde o první účetní období podfondu, 26. 6. – 31. 12. 2025); čistý zisk 340 004 tis. Kč, nové investice 2 381 816 tis. Kč.\"}], \"",
+   " 381 816 tis. Kč.\"}], \"scoped_not_counted\": [], \"not_applied\": [{\"field\": \"aum_history\", \"reason\": \"První účetní období podfondu (26. 6. – 31. 12. 2025); celý srovnávací sloupec tabulky ukazatelů je N/A.\"}, {\"field\": \"ann",
+   "{\"fund\": \"Vista SICAV a.s.\", \"canonical_index\": 328, \"field\": \"aum_history\", \"reason\": \"První účetní období podfondu (26. 6. – 31. 12. 2025); celý srovnávací sloupec tabulky ukazatelů je N/A.\"}",
+   "u“: NAV Podfondu 2 721 820 tis. Kč k poslednímu dni Účetního období (srovnávací sloupec N/A – jde o první účetní období podfondu, 26. 6. – 31. 12. 2025); čistý zisk 340 004 tis. Kč, nové investice 2 381 816 tis. Kč.\"}",
+   "u“: NAV Podfondu 2 721 820 tis. Kč k poslednímu dni Účetního období (srovnávací sloupec N/A – jde o první účetní období podfondu, 26. 6. – 31. 12. 2025); čistý zisk 340 004 tis. Kč, nové investice 2 381 816 tis. Kč.\", \"as"
+  ]
+ },
+ "Partners Innovation Fund SICAV, a.s.": {
+  "establishment_dates": [
+   "2026-01-26"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "06936902f2e60f7084\"], \"before\": 0, \"new\": [\"manager\"], \"after\": 1, \"residual_gap_reason\": \"Fond byl zapsán 26. 1. 2026, žádná výroční zpráva ani statut podfondu neexistuje. Kanonický web p",
+   "06936902f2e60f7084\"], \"before\": 0, \"new\": [\"manager\"], \"after\": 1, \"residual_gap_reason\": \"Fond byl zapsán 26. 1. 2026, žádná výroční zpráva ani statut podfondu neexistuje. Kanonický web p"
+  ]
+ },
+ "AGNOS Investment Fund SICAV a.s.": {
+  "establishment_dates": [
+   "2026-01-29"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "\"], \"before\": 0, \"new\": [\"manager\", \"minimum_investment\"], \"after\": 2, \"residual_gap_reason\": \"Fond zapsán 29. 1. 2026; jediné listiny jsou dva notářské zápisy se stanovami, žádná výroční ",
+   "\"], \"before\": 0, \"new\": [\"manager\", \"minimum_investment\"], \"after\": 2, \"residual_gap_reason\": \"Fond zapsán 29. 1. 2026; jediné listiny jsou dva notářské zápisy se stanovami, žádná výroční "
+  ]
+ },
+ "Mariposa Invest SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-11-18"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "e6117284430b0d57a05d926cd7a\"], \"before\": 1, \"new\": [], \"after\": 1, \"residual_gap_reason\": \"Fond byl zapsán 18. 11. 2025, žádná výroční zpráva neexistuje a jediná listina je obrazový sken. K",
+   "e6117284430b0d57a05d926cd7a\"], \"before\": 1, \"new\": [], \"after\": 1, \"residual_gap_reason\": \"Fond byl zapsán 18. 11. 2025, žádná výroční zpráva neexistuje a jediná listina je obrazový sken. K"
+  ]
+ },
+ "H2O FUND SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-09-17"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   " zpráva 2025 fondu H2O FUND SICAV, a.s., IČO 220 55 452, LEI 315700L31WECALEELX14, sp. zn. B 29110, vznik 17. 9. 2024; dokument z vlastního panelu fondu na AVANT hubu.\", \"evidence\": \"„1. ",
+   " zpráva 2025 fondu H2O FUND SICAV, a.s., IČO 220 55 452, LEI 315700L31WECALEELX14, sp. zn. B 29110, vznik 17. 9. 2024; dokument z vlastního panelu fondu na AVANT hubu.\", \"evidence\": \"„1. ",
+   " zpráva 2025 fondu H2O FUND SICAV, a.s., IČO 220 55 452, LEI 315700L31WECALEELX14, sp. zn. B 29110, vznik 17. 9. 2024; dokument z vlastního panelu fondu na AVANT hubu.\", \"hub_url\": \"https"
+  ]
+ },
+ "VERNE CAPITAL SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-12-18"
+  ],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-12-18/2025-12-31"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   "va 2025 fondu VERNE CAPITAL SICAV, a.s., IČO 223 87 340, LEI 315700KARPS6PBXO3H33, sp. zn. B 29377, vznik 18. 12. 2024; z vlastního panelu fondu na AVANT hubu.\", \"evidence\": \"„1. Základní ",
+   "{\"kind\": \"not_applied\", \"fund\": \"VERNE CAPITAL SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"První (částečné) účetní období 18. 12. 2024 – 31. 12. 2025; tabulka ukazatelů tiskne u všech položek pomlčku ve srovnávacím slou",
+   "ment\", \"historical_values\", \"investment_horizon\", \"fees\"], \"after\": 6, \"residual_gap_reason\": \"Fond vznikl 18. 12. 2024 — první účetní období, takže aum_history a annual_returns neexistují;",
+   "{\"kind\": \"not_applied\", \"fund\": \"VERNE CAPITAL SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"První (částečné) účetní období 18. 12. 2024 – 31. 12. 2025; tabulka ukazatelů tiskne u všech položek pomlčku ve srovnávacím slou",
+   "va 2025 fondu VERNE CAPITAL SICAV, a.s., IČO 223 87 340, LEI 315700KARPS6PBXO3H33, sp. zn. B 29377, vznik 18. 12. 2024; z vlastního panelu fondu na AVANT hubu.\", \"evidence\": \"„1. Základní "
+  ]
+ },
+ "ESG HOLDING SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-06-27"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "ot_applied\", \"fund\": \"ESG HOLDING SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 27. 6. 2025 a k 31. 12. 2025 dosud nezahájil vydávání investičních akcií: „NAV Fo",
+   "z2025_esg-holding-sicav-a.s.pdf\"], \"before\": 2, \"new\": [], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 27. 6. 2025, k rozvahovému dni nezahájil investiční činnost (NAV 0, ztráta -85 ti",
+   "ot_applied\", \"fund\": \"ESG HOLDING SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 27. 6. 2025 a k 31. 12. 2025 dosud nezahájil vydávání investičních akcií: „NAV Fo",
+   "z2025_esg-holding-sicav-a.s.pdf\"], \"before\": 2, \"new\": [], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 27. 6. 2025, k rozvahovému dni nezahájil investiční činnost (NAV 0, ztráta -85 ti"
+  ]
+ },
+ "LitFin SICAV a.s.": {
+  "establishment_dates": [
+   "2024-10-02"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "cope\": \"LitFin Alpha podfond — jeden ze dvou podfondů k 31. 12. 2024 (druhý, LitFin Credit podfond, vznikl 2. 10. 2024 a má prodloužené účetní období, první závěrka až k 31. 12. 2025)\", \"s",
+   "cope\": \"LitFin Alpha podfond — jeden ze dvou podfondů k 31. 12. 2024 (druhý, LitFin Credit podfond, vznikl 2. 10. 2024 a má prodloužené účetní období, první závěrka až k 31. 12. 2025)\", \"s",
+   "cope\": \"LitFin Alpha podfond — jeden ze dvou podfondů k 31. 12. 2024 (druhý, LitFin Credit podfond, vznikl 2. 10. 2024 a má prodloužené účetní období, první závěrka až k 31. 12. 2025)\", \"s"
+  ]
+ },
+ "G Futura SICAV a.s.": {
+  "establishment_dates": [
+   "2024-07-15"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "\": \"G Futura podfond I — jediný podfond fondu („Fond vytvořil podfond G Futura podfond I, který byl zapsán do seznamu fondů vedeného ČNB dne 15. 7. 2024“); majetek Fondu samotného činil 100 tis. Kč\", \"scope_class\": \"SOLE_S",
+   "um_history\", \"reason\": \"Tabulka „za poslední tři uplynulá období“ obsahuje jediný sloupec — podfond vznikl 15. 7. 2024, předchozí období neexistuje.\"}",
+   "um_history\", \"reason\": \"Tabulka „za poslední tři uplynulá období“ obsahuje jediný sloupec — podfond vznikl 15. 7. 2024, předchozí období neexistuje.\"}",
+   "\": \"G Futura podfond I — jediný podfond fondu („Fond vytvořil podfond G Futura podfond I, který byl zapsán do seznamu fondů vedeného ČNB dne 15. 7. 2024“); majetek Fondu samotného činil 100 tis. Kč\", \"scope_class\": \"SOLE_S",
+   "\": \"G Futura podfond I — jediný podfond fondu („Fond vytvořil podfond G Futura podfond I, který byl zapsán do seznamu fondů vedeného ČNB dne 15. 7. 2024“); majetek Fondu samotného činil 100 tis. Kč\", \"identity_evidence\": \""
+  ]
+ },
+ "Importo SICAV a.s.": {
+  "establishment_dates": [
+   "2024-01-01"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "097\", \"as_of\": \"2025-03-31\", \"scope\": \"Importo podfond Group (NID 75164531) — jediný podfond fondu, vznik 1. 1. 2024 stejně jako fond; vlastní kapitál Fondu samotného je 100 tis. Kč slup",
+   "097\", \"as_of\": \"2025-03-31\", \"scope\": \"Importo podfond Group (NID 75164531) — jediný podfond fondu, vznik 1. 1. 2024 stejně jako fond; vlastní kapitál Fondu samotného je 100 tis. Kč slup",
+   "cope_class\": \"SOLE_SUBFUND\", \"scope\": \"Importo podfond Group (NID 75164531) — jediný podfond fondu, vznik 1. 1. 2024 stejně jako fond; vlastní kapitál Fondu samotného je 100 tis. Kč slup"
+  ]
+ },
+ "Progresiv development investiční fond s proměnným základním kapitálem, a.s.": {
+  "establishment_dates": [
+   "2024-07-31"
+  ],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-07-31/2024-12-31"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   "ype\": \"net_assets\", \"as_of\": \"2024-12-31\", \"share_class\": null, \"scope_type\": \"fund\", \"condition\": \"První (částečné) účetní období 31. 7. – 31. 12. 2024; čistá ztráta období −1 059 tis. Kč.\"}, \"source_url\": \"https://or.jus",
+   "-31\", \"nav_per_share\": 0.4824, \"currency\": \"CZK\"}]}], \"note\": \"Jediný publikovaný datový bod — fond vznikl 31. 7. 2024.\"}, \"source_url\": \"https://or.justice.cz/ias/content/download?id=68b6",
+   "elopment investiční fond s proměnným základním kapitálem, a.s.\", \"field\": \"aum_history\", \"reason\": \"První účetní období (31. 7. – 31. 12. 2024); srovnávací sloupec je celý „n/a“.\"}",
+   "strator\", \"assets_under_management\", \"historical_values\"], \"after\": 5, \"residual_gap_reason\": \"Fond vznikl 31. 7. 2024 → žádná historie; statut nepublikován a stanovy ve Sbírce listin jsou",
+   "elopment investiční fond s proměnným základním kapitálem, a.s.\", \"field\": \"aum_history\", \"reason\": \"První účetní období (31. 7. – 31. 12. 2024); srovnávací sloupec je celý „n/a“.\"}"
+  ]
+ },
+ "KK investiční fond SICAV a.s.": {
+  "establishment_dates": [
+   "2025-06-06",
+   "2025-07-21"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "\", \"fund\": \"KK investiční fond SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 6. 6. 2025; první výroční zpráva dosud neexistuje (ve Sbírce listin je pouze zak",
+   "4afb1e935a9\"], \"before\": 1, \"new\": [\"investment_horizon\"], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 6. 6. 2025 → žádná výroční zpráva; kanonický web kkip.cz je distribuční portál p",
+   " Funds a výroční zprávy samotné KKIP — ani jeden nepatří fondu. Fond samotný má IČO 235 11 834, byl zapsán 21. 7. 2025 a ve Sbírce listin (B 29865) má jedinou listinu: notářský zápis se st",
+   " Funds a výroční zprávy samotné KKIP — ani jeden nepatří fondu. Fond samotný má IČO 235 11 834, byl zapsán 21. 7. 2025 a ve Sbírce listin (B 29865) má jedinou listinu: notářský zápis se st",
+   " Funds a výroční zprávy samotné KKIP — ani jeden nepatří fondu. Fond samotný má IČO 235 11 834, byl zapsán 21. 7. 2025 a ve Sbírce listin (B 29865) má jedinou listinu: notářský zápis se st"
+  ]
+ },
+ "Nexura Multi-Asset SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-10-24"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "ied\", \"fund\": \"Nexura Multi-Asset SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 24. 10. 2025; ve Sbírce listin je pouze zakladatelský notářský zápis, žádná účetní",
+   "1566e9be44e4084a0e5746e92eaccfc\"], \"before\": 2, \"new\": [], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 24. 10. 2025 — jediným veřejným dokumentem je zakladatelský notářský zápis (statut",
+   "ied\", \"fund\": \"Nexura Multi-Asset SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 24. 10. 2025; ve Sbírce listin je pouze zakladatelský notářský zápis, žádná účetní",
+   "1566e9be44e4084a0e5746e92eaccfc\"], \"before\": 2, \"new\": [], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 24. 10. 2025 — jediným veřejným dokumentem je zakladatelský notářský zápis (statut"
+  ]
+ },
+ "Patronus třicátý sedmý SICAV a.s.": {
+  "establishment_dates": [
+   "2025-12-04"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "fund\": \"Patronus třicátý sedmý SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 4. 12. 2025; ve Sbírce listin jsou pouze dva notářské zápisy (zakladatelský a změ",
+   "6737ac417494e73b2f054cf7dc8535b\"], \"before\": 1, \"new\": [], \"after\": 1, \"residual_gap_reason\": \"Fond vznikl 4. 12. 2025, nemá panel na AMISTA hubu a ve Sbírce listin má jen notářské zápisy;",
+   "fund\": \"Patronus třicátý sedmý SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 4. 12. 2025; ve Sbírce listin jsou pouze dva notářské zápisy (zakladatelský a změ",
+   "6737ac417494e73b2f054cf7dc8535b\"], \"before\": 1, \"new\": [], \"after\": 1, \"residual_gap_reason\": \"Fond vznikl 4. 12. 2025, nemá panel na AMISTA hubu a ve Sbírce listin má jen notářské zápisy;"
+  ]
+ },
+ "Fond dostupného bydlení České republiky SICAV a.s.": {
+  "establishment_dates": [
+   "2026-01-15"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "upného bydlení České republiky SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 15. 1. 2026 (IČO 24366803); ve Sbírce listin jsou pouze dva notářské zápisy, žádn",
+   "8e43a891834435cb8ca31f44bf619ac\"], \"before\": 2, \"new\": [], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 15. 1. 2026 — jediné veřejné dokumenty jsou zakladatelský notářský zápis se stano",
+   "upného bydlení České republiky SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 15. 1. 2026 (IČO 24366803); ve Sbírce listin jsou pouze dva notářské zápisy, žádn",
+   "8e43a891834435cb8ca31f44bf619ac\"], \"before\": 2, \"new\": [], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 15. 1. 2026 — jediné veřejné dokumenty jsou zakladatelský notářský zápis se stano"
+  ]
+ },
+ "Mabon investiční fond s proměnným základním kapitálem a.s.": {
+  "establishment_dates": [
+   "2009-05-27"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "fond s proměnným základním kapitálem a.s., IČO 28904681, LEI 31570091GP2IAKWFGT12, sp. zn. B 15302, vznik 27. 5. 2009“.\", \"evidence\": \"„e) … provozních ukazatelů: NAV Fondu 820 057 tis. K",
+   "fond s proměnným základním kapitálem a.s., IČO 28904681, LEI 31570091GP2IAKWFGT12, sp. zn. B 15302, vznik 27. 5. 2009“.\", \"evidence\": \"„e) … provozních ukazatelů: NAV Fondu 820 057 tis. K",
+   "fond s proměnným základním kapitálem a.s., IČO 28904681, LEI 31570091GP2IAKWFGT12, sp. zn. B 15302, vznik 27. 5. 2009“.\", \"hub_url\": \"https://www.avantfunds.cz/informace-o-fondech/\", \"pro"
+  ]
+ },
+ "Commercial RE Investments SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-02-05"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   ": Commercial RE Investments SICAV, a.s., IČO 225 57 211, LEI 3157006YE6Z8EH1PFY31, sp. zn. B 29473, vznik 5. 2. 2025“.\", \"evidence\": \"„Obhospodařovatel: AVANT IS; Poznámka: Obhospodařova",
+   "fund\": \"Commercial RE Investments SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 5. 2. 2025 a je slupka (neinvestiční fondový kapitál 20 tis. Kč); veškerá činnos",
+   "-sicav_final.pdf\"], \"before\": 3, \"new\": [\"administrator\"], \"after\": 4, \"residual_gap_reason\": \"Fond vznikl 5. 2. 2025; jediný podfond nemá publikovanou výroční zprávu ani statut, takže AU",
+   "fund\": \"Commercial RE Investments SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 5. 2. 2025 a je slupka (neinvestiční fondový kapitál 20 tis. Kč); veškerá činnos",
+   ": Commercial RE Investments SICAV, a.s., IČO 225 57 211, LEI 3157006YE6Z8EH1PFY31, sp. zn. B 29473, vznik 5. 2. 2025“.\", \"evidence\": \"„Obhospodařovatel: AVANT IS; Poznámka: Obhospodařova"
+  ]
+ },
+ "GLAMOUR Fund SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-10-18"
+  ],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-10-18/2025-12-31"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   "ype\": \"net_assets\", \"as_of\": \"2025-12-31\", \"share_class\": null, \"scope_type\": \"fund\", \"condition\": \"První účetní období 18. 10. 2024 – 31. 12. 2025; čistá ztráta období −165 344 tis. Kč.\"}, \"source_url\": \"https://www.",
+   "{\"kind\": \"not_applied\", \"fund\": \"GLAMOUR Fund SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"První účetní období je 14,5měsíční (18. 10. 2024 – 31. 12. 2025) a srovnávací sloupec je nulový; tištěná „Změna v % 100,00“ u hodnoty",
+   "MOUR Fund SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"Předchozí účetní období neexistuje (fond vznikl 18. 10. 2024); srovnávací sloupec je 0.\"}",
+   "MOUR Fund SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"Předchozí účetní období neexistuje (fond vznikl 18. 10. 2024); srovnávací sloupec je 0.\"}",
+   "{\"kind\": \"not_applied\", \"fund\": \"GLAMOUR Fund SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"První účetní období je 14,5měsíční (18. 10. 2024 – 31. 12. 2025) a srovnávací sloupec je nulový; tištěná „Změna v % 100,00“ u hodnoty"
+  ]
+ },
+ "ALCA FUND SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-05-05"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "u na AVANT hubu: „ALCA FUND SICAV, a.s., IČO 215 36 490, LEI 315700ZSDGIX5MSCN953, sp. zn. B 28854, vznik 5. 5. 2024“.\", \"evidence\": \"Tabulka základních údajů: „Obhospodařovatel TILLER I",
+   "u na AVANT hubu: „ALCA FUND SICAV, a.s., IČO 215 36 490, LEI 315700ZSDGIX5MSCN953, sp. zn. B 28854, vznik 5. 5. 2024“.\", \"evidence\": \"Tabulka základních údajů: „Obhospodařovatel TILLER I",
+   "u na AVANT hubu: „ALCA FUND SICAV, a.s., IČO 215 36 490, LEI 315700ZSDGIX5MSCN953, sp. zn. B 28854, vznik 5. 5. 2024“.\", \"hub_url\": \"https://www.avantfunds.cz/informace-o-fondech/\", \"pro"
+  ]
+ },
+ "SF Investments SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-01-24"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "AVANT hubu: „SF Investments SICAV, a.s., IČO 211 71 769, LEI 315700SIAFAGDX3IFP33, sp. zn. B 28669, vznik 24. 1. 2024“.\", \"evidence\": \"„Obhospodařovatel: AVANT IS; Poznámka: Obhospodařova",
+   "AVANT hubu: „SF Investments SICAV, a.s., IČO 211 71 769, LEI 315700SIAFAGDX3IFP33, sp. zn. B 28669, vznik 24. 1. 2024“.\", \"evidence\": \"„Obhospodařovatel: AVANT IS; Poznámka: Obhospodařova",
+   "AVANT hubu: „SF Investments SICAV, a.s., IČO 211 71 769, LEI 315700SIAFAGDX3IFP33, sp. zn. B 28669, vznik 24. 1. 2024“.\", \"hub_url\": \"https://www.avantfunds.cz/informace-o-fondech/\", \"pro"
+  ]
+ },
+ "ČCE (B), investiční fond s proměnným základním kapitálem, a.s.": {
+  "establishment_dates": [
+   "2015-03-05"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "/MSPH): „Název investičního fondu: ČCE (B), investiční fond s proměnným základním kapitálem, a.s.“, vznik 5. 3. 2015, jediný podfond ČCE (B) Restituční podfond zapsaný 16. 3. 2015.\", \"ev",
+   "/MSPH): „Název investičního fondu: ČCE (B), investiční fond s proměnným základním kapitálem, a.s.“, vznik 5. 3. 2015, jediný podfond ČCE (B) Restituční podfond zapsaný 16. 3. 2015.\", \"ev",
+   "/MSPH): „Název investičního fondu: ČCE (B), investiční fond s proměnným základním kapitálem, a.s.“, vznik 5. 3. 2015, jediný podfond ČCE (B) Restituční podfond zapsaný 16. 3. 2015.\", \"hu"
+  ]
+ },
+ "FONDEFI SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-11-12",
+   "2025-11-21"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán do seznamu ČNB 12. 11. 2025 a vznikl 21. 11. 2025; první výroční zpráva neexistuje.\"}",
+   "ot_applied\", \"fund\": \"FONDEFI SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán do seznamu ČNB 12. 11. 2025 a vznikl 21. 11. 2025; první výroční zpráva neexistuje.\"}",
+   "p?id=3555\", \"https://fondefi.cz\"], \"before\": 4, \"new\": [], \"after\": 4, \"residual_gap_reason\": \"Fond vznikl 21. 11. 2025 — jediným veřejným dokumentem je pětistránkový zastřešující statut, k",
+   "a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán do seznamu ČNB 12. 11. 2025 a vznikl 21. 11. 2025; první výroční zpráva neexistuje.\"}",
+   "ot_applied\", \"fund\": \"FONDEFI SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán do seznamu ČNB 12. 11. 2025 a vznikl 21. 11. 2025; první výroční zpráva neexistuje.\"}"
+  ]
+ },
+ "FIDUROCK nemovitostní fond SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-03-20"
+  ],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-03-25/2024-12-31"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   "ční zpráva 2024 podaná samotným fondem do Sbírky listin (B 28785/SL2/MSPH, subjektId 1234153): fond zapsán 20. 3. 2024, IČO 213 80 490, sídlo Václavské náměstí 2132/47, Praha 1, jediný pod",
+   "\"not_applied\", \"fund\": \"FIDUROCK nemovitostní fond SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"První účetní období (25. 3. – 31. 12. 2024); srovnávací sloupec je 0.\"}",
+   "strator\", \"assets_under_management\", \"historical_values\"], \"after\": 6, \"residual_gap_reason\": \"Fond vznikl 20. 3. 2024 → první částečné období bez historie a bez ročního výnosu; statut pod",
+   "\"not_applied\", \"fund\": \"FIDUROCK nemovitostní fond SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"První účetní období (25. 3. – 31. 12. 2024); srovnávací sloupec je 0.\"}",
+   "ční zpráva 2024 podaná samotným fondem do Sbírky listin (B 28785/SL2/MSPH, subjektId 1234153): fond zapsán 20. 3. 2024, IČO 213 80 490, sídlo Václavské náměstí 2132/47, Praha 1, jediný pod"
+  ]
+ },
+ "NWD SICAV a.s.": {
+  "establishment_dates": [
+   "2016-08-03"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "ční zpráva 2024 podaná samotným fondem do Sbírky listin (B 21721/SL29/MSPH, subjektId 941229); fond zapsán 3. 8. 2016, do seznamu ČNB 15. 7. 2016.\", \"evidence\": \"„Podfondy vytvořené Fonde",
+   "ční zpráva 2024 podaná samotným fondem do Sbírky listin (B 21721/SL29/MSPH, subjektId 941229); fond zapsán 3. 8. 2016, do seznamu ČNB 15. 7. 2016.\", \"evidence\": \"„Podfondy vytvořené Fonde",
+   "ční zpráva 2024 podaná samotným fondem do Sbírky listin (B 21721/SL29/MSPH, subjektId 941229); fond zapsán 3. 8. 2016, do seznamu ČNB 15. 7. 2016.\", \"evidence\": \"„Podfondy vytvořené Fonde"
+  ]
+ },
+ "Algorithmic SICAV a.s.": {
+  "establishment_dates": [
+   "2021-05-09"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "279/SL10/MSPH, subjektId 1121227): „Algorithmic SICAV a.s., IČO 10829954, LEI 315700QQA20H79I5S993, vznik 9. 5. 2021“, podfond Algorithmic Hi-Tech Podfond (NID 75162601).\", \"evidence\": \"",
+   "279/SL10/MSPH, subjektId 1121227): „Algorithmic SICAV a.s., IČO 10829954, LEI 315700QQA20H79I5S993, vznik 9. 5. 2021“, podfond Algorithmic Hi-Tech Podfond (NID 75162601).\", \"evidence\": \"",
+   "279/SL10/MSPH, subjektId 1121227): „Algorithmic SICAV a.s., IČO 10829954, LEI 315700QQA20H79I5S993, vznik 9. 5. 2021“, podfond Algorithmic Hi-Tech Podfond (NID 75162601).\", \"hub_url\": \"h"
+  ]
+ },
+ "AMBEAT EQUITY fond dlouhodobé péče SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": []
+ },
+ "ART PALACE Fund SICAV a.s.": {
+  "establishment_dates": [
+   "2025-08-20"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   ". publikovaný na vlastním webu fondu (artpalacefund.com/files/art_palace_sicav_statut_cz.pdf); fond vznikl 20. 8. 2025, měna EUR.\", \"evidence\": \"čl. 1.3.1: „Administrátorem Fondu je Obhosp",
+   "applied\", \"fund\": \"ART PALACE Fund SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 20. 8. 2025; ve Sbírce listin je pouze zakladatelský notářský zápis a první výroč",
+   "efore\": 4, \"new\": [\"administrator\", \"minimum_investment\"], \"after\": 6, \"residual_gap_reason\": \"Fond vznikl 20. 8. 2025 → žádná výroční zpráva, tedy ani AUM, historie, hodnoty akcií či ročn",
+   "applied\", \"fund\": \"ART PALACE Fund SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 20. 8. 2025; ve Sbírce listin je pouze zakladatelský notářský zápis a první výroč",
+   ". publikovaný na vlastním webu fondu (artpalacefund.com/files/art_palace_sicav_statut_cz.pdf); fond vznikl 20. 8. 2025, měna EUR.\", \"evidence\": \"čl. 1.3.1: „Administrátorem Fondu je Obhosp"
+  ]
+ },
+ "HZ Trust SICAV, a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": []
+ },
+ "STARTEEPO Invest, investiční fond s proměnným základním kapitálem, a.s.": {
+  "establishment_dates": [
+   "2017-11-09"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   ", \"after\": 3, \"residual_gap_reason\": \"Dvoupodfondová struktura samosprávného fondu (IČO 065 87 194, zapsán 9. 11. 2017) bez publikovaných statutů; VZ 2025 ve Sbírce listin je nečitelná, VZ",
+   ", \"after\": 3, \"residual_gap_reason\": \"Dvoupodfondová struktura samosprávného fondu (IČO 065 87 194, zapsán 9. 11. 2017) bez publikovaných statutů; VZ 2025 ve Sbírce listin je nečitelná, VZ"
+  ]
+ },
+ "Cornerstone Investments SICAV, a.s.": {
+  "establishment_dates": [
+   "2017-06-12"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "u: „Cornerstone Investments SICAV, a.s., IČO 061 80 337, LEI 315700A8MOP0HXJMDP03, sp. zn. B 22595, vznik 12. 6. 2017“.\", \"evidence\": \"„Obhospodařovatel: AVANT IS; Poznámka: Obhospodařova",
+   "u: „Cornerstone Investments SICAV, a.s., IČO 061 80 337, LEI 315700A8MOP0HXJMDP03, sp. zn. B 22595, vznik 12. 6. 2017“.\", \"evidence\": \"„Obhospodařovatel: AVANT IS; Poznámka: Obhospodařova",
+   "u: „Cornerstone Investments SICAV, a.s., IČO 061 80 337, LEI 315700A8MOP0HXJMDP03, sp. zn. B 22595, vznik 12. 6. 2017“.\", \"hub_url\": \"https://www.avantfunds.cz/informace-o-fondech/\", \"pro"
+  ]
+ },
+ "Rohlik Growth SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-11-03/2025-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   ", \"observations\": [{\"as_of\": \"2025-12-31\", \"nav_per_share\": 1.2147, \"currency\": \"EUR\"}]}], \"note\": \"První účetní období 3. 11. 2024 – 31. 12. 2025; výchozí hodnota všech tříd byla 1,0000.\"}, \"source_url\": \"https://ww",
+   "{\"kind\": \"not_applied\", \"fund\": \"Rohlik Growth SICAV a.s.\", \"field\": \"aum_history\", \"reason\": \"První účetní období (3. 11. 2024 – 31. 12. 2025); srovnávací sloupce jsou prázdné („-“).\"}",
+   "{\"kind\": \"not_applied\", \"fund\": \"Rohlik Growth SICAV a.s.\", \"field\": \"aum_history\", \"reason\": \"První účetní období (3. 11. 2024 – 31. 12. 2025); srovnávací sloupce jsou prázdné („-“).\"}",
+   ", \"observations\": [{\"as_of\": \"2025-12-31\", \"nav_per_share\": 1.2147, \"currency\": \"EUR\"}]}], \"note\": \"První účetní období 3. 11. 2024 – 31. 12. 2025; výchozí hodnota všech tříd byla 1,0000.\"}, \"source_url\": \"https://ww",
+   ", \"observations\": [{\"as_of\": \"2025-12-31\", \"nav_per_share\": 1.2147, \"currency\": \"EUR\"}]}], \"note\": \"První účetní období 3. 11. 2024 – 31. 12. 2025; výchozí hodnota všech tříd byla 1,0000.\"}, \"source_url\": \"https://ww"
+  ]
+ },
+ "ARETE ENERGY TRANSITION SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": []
+ },
+ "RIVENITY SICAV a.s.": {
+  "establishment_dates": [
+   "2026-03-05"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   ": \"not_applied\", \"fund\": \"RIVENITY SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 5. 3. 2026; ve sbírce listin je jedinou listinou zakladatelský notářský zápis, ž",
+   "\"], \"before\": 0, \"new\": [\"manager\", \"minimum_investment\"], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 5. 3. 2026, jediná listina je zakladatelský zápis se stanovami. Administrátor je",
+   ": \"not_applied\", \"fund\": \"RIVENITY SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 5. 3. 2026; ve sbírce listin je jedinou listinou zakladatelský notářský zápis, ž",
+   "\"], \"before\": 0, \"new\": [\"manager\", \"minimum_investment\"], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 5. 3. 2026, jediná listina je zakladatelský zápis se stanovami. Administrátor je"
+  ]
+ },
+ "Direct FUNDAMENT SICAV a.s.": {
+  "establishment_dates": [
+   "2026-03-21"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "pplied\", \"fund\": \"Direct FUNDAMENT SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 21. 3. 2026; ve sbírce listin jsou jen dva zakladatelské notářské zápisy, žádná ú",
+   "\"], \"before\": 0, \"new\": [\"manager\", \"minimum_investment\"], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 21. 3. 2026 a byl 13. 8. 2026 přejmenován na AKKU Fond SICAV a.s. (audit_flag). E",
+   "pplied\", \"fund\": \"Direct FUNDAMENT SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 21. 3. 2026; ve sbírce listin jsou jen dva zakladatelské notářské zápisy, žádná ú",
+   "\"], \"before\": 0, \"new\": [\"manager\", \"minimum_investment\"], \"after\": 2, \"residual_gap_reason\": \"Fond vznikl 21. 3. 2026 a byl 13. 8. 2026 přejmenován na AKKU Fond SICAV a.s. (audit_flag). E"
+  ]
+ },
+ "OFO Project ONE SICAV, a.s.": {
+  "establishment_dates": [
+   "2026-04-02"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "pplied\", \"fund\": \"OFO Project ONE SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 2. 4. 2026; žádná účetní závěrka ani výroční zpráva neexistuje.\"}",
+   "ktId=1314974&typ=UPLNY\"], \"before\": 0, \"new\": [\"manager\"], \"after\": 1, \"residual_gap_reason\": \"Fond vznikl 2. 4. 2026; jediná listina (zakladatelské dokumenty + stanovy, 28 stran) je sken",
+   "pplied\", \"fund\": \"OFO Project ONE SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 2. 4. 2026; žádná účetní závěrka ani výroční zpráva neexistuje.\"}",
+   "ktId=1314974&typ=UPLNY\"], \"before\": 0, \"new\": [\"manager\"], \"after\": 1, \"residual_gap_reason\": \"Fond vznikl 2. 4. 2026; jediná listina (zakladatelské dokumenty + stanovy, 28 stran) je sken"
+  ]
+ },
+ "First Veterinary Fund Central Europe SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2021-12-07/2022-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   ": \"CZK\", \"metric_type\": \"net_assets\", \"as_of\": \"2022-12-31\", \"condition\": \"Zastaralá hodnota: jde o první (a jediné čitelné) účetní období 7. 12. 2021 – 31. 12. 2022. Výroční zprávy 2023 a 2024 jsou ve sbírce listin uloženy jako ESEF b",
+   ": \"CZK\", \"metric_type\": \"net_assets\", \"as_of\": \"2022-12-31\", \"condition\": \"Zastaralá hodnota: jde o první (a jediné čitelné) účetní období 7. 12. 2021 – 31. 12. 2022. Výroční zprávy 2023 a 2024 jsou ve sbírce listin uloženy jako ESEF b",
+   ": \"CZK\", \"metric_type\": \"net_assets\", \"as_of\": \"2022-12-31\", \"condition\": \"Zastaralá hodnota: jde o první (a jediné čitelné) účetní období 7. 12. 2021 – 31. 12. 2022. Výroční zprávy 2023 a 2024 jsou ve sbírce listin uloženy jako ESEF b"
+  ]
+ },
+ "FIDUROCK Retail Parks Fund SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-11-26"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "und\": \"FIDUROCK Retail Parks Fund SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 26. 11. 2025 (B 30170, IČO 239 99 179); ve sbírce listin je jedinou listinou zakla",
+   "tail Parks Fund SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"Viz assets_under_management — fond vznikl 26. 11. 2025 a nemá žádnou účetní závěrku.\"}",
+   "ypis-sl-firma?subjektId=1298674\"], \"before\": 7, \"new\": [], \"after\": 7, \"residual_gap_reason\": \"Fond vznikl 26. 11. 2025; sbírka listin obsahuje jen zakladatelský notářský zápis, žádnou účet",
+   "tail Parks Fund SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"Viz assets_under_management — fond vznikl 26. 11. 2025 a nemá žádnou účetní závěrku.\"}",
+   "und\": \"FIDUROCK Retail Parks Fund SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 26. 11. 2025 (B 30170, IČO 239 99 179); ve sbírce listin je jedinou listinou zakla"
+  ]
+ },
+ "Accolade Assets Fund SICAV, a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-12-20/2025-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   "ement\", \"reason\": \"Podfond je k 31. 12. 2025 prázdný: aktiva celkem 0, vlastní kapitál -12 tis. Kč (první účetní období 20. 12. 2024 – 31. 12. 2025). Fondový kapitál fondu 12 tis. Kč je neinvestiční slupka.\", \"source\"",
+   "\": \"not_applied\", \"fund\": \"Accolade Assets Fund SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"První (částečné) účetní období 20. 12. 2024 – 31. 12. 2025 bez emise investičních akcií; žádná výkonnost neexistuje.\", \"source\":",
+   "\": \"not_applied\", \"fund\": \"Accolade Assets Fund SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"První (částečné) účetní období 20. 12. 2024 – 31. 12. 2025 bez emise investičních akcií; žádná výkonnost neexistuje.\", \"source\":",
+   "ement\", \"reason\": \"Podfond je k 31. 12. 2025 prázdný: aktiva celkem 0, vlastní kapitál -12 tis. Kč (první účetní období 20. 12. 2024 – 31. 12. 2025). Fondový kapitál fondu 12 tis. Kč je neinvestiční slupka.\", \"source\""
+  ]
+ },
+ "FLOWPAY Fund SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [
+   "2026"
+  ],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "\", \"fund\": \"FLOWPAY Fund SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond i podfond vznikly v únoru/březnu 2026; žádná výroční ani pololetní zpráva zatím neexistuje (AVANT hub nabíz",
+   "\", \"fund\": \"FLOWPAY Fund SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond i podfond vznikly v únoru/březnu 2026; žádná výroční ani pololetní zpráva zatím neexistuje (AVANT hub nabíz"
+  ]
+ },
+ "Renfin International SICAV a.s.": {
+  "establishment_dates": [
+   "2025-01-27"
+  ],
+  "establishment_years": [
+   "2025"
+  ],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "ed\", \"fund\": \"Renfin International SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 27. 1. 2025 a jeho první výroční zpráva (období 27. 1. – 31. 12. 2025) vykazuje p",
+   ". Kč. Veškerá činnost patří podfondu Renfin Hydro 1, jehož výroční zpráva není publikována (podfond vznikl v prosinci 2025).\", \"source\": \"https://www.avantfunds.cz/wp-content/uploads/2025/12/v",
+   " a.s.\", \"new\": [], \"note\": \"AVANT hub (VZ 2025 fondu, veřejná výzva VIA podfondu) + renfin.eu. Fond vznikl 27. 1. 2025 a je slupka; podfond Renfin Hydro 1 nemá publikovanou zprávu ani stat",
+   "ed\", \"fund\": \"Renfin International SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond vznikl 27. 1. 2025 a jeho první výroční zpráva (období 27. 1. – 31. 12. 2025) vykazuje p",
+   ". Kč. Veškerá činnost patří podfondu Renfin Hydro 1, jehož výroční zpráva není publikována (podfond vznikl v prosinci 2025).\", \"source\": \"https://www.avantfunds.cz/wp-content/uploads/2025/12/v"
+  ]
+ },
+ "Next Gen Responsibility SICAV, a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-08-12/2025-06-30"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   "dition\": \"'Jediným podfondem Fondu k datu účetní závěrky je Fond Next Gen Responsibility, podfond.' První (prodloužené) účetní období 12. 8. 2024 – 30. 6. 2025.\", \"as_of\": \"2025-06-30\"}",
+   "\": \"not_applied\", \"fund\": \"Next Gen Responsibility SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"První účetní období fondu i podfondu je 12. 8. 2024 – 30. 6. 2025; žádné srovnávací období neexistuje.\", \"source\": \"https://or.justice.",
+   "\": \"not_applied\", \"fund\": \"Next Gen Responsibility SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"První účetní období fondu i podfondu je 12. 8. 2024 – 30. 6. 2025; žádné srovnávací období neexistuje.\", \"source\": \"https://or.justice.",
+   "dition\": \"'Jediným podfondem Fondu k datu účetní závěrky je Fond Next Gen Responsibility, podfond.' První (prodloužené) účetní období 12. 8. 2024 – 30. 6. 2025.\", \"as_of\": \"2025-06-30\"}",
+   "dition\": \"'Jediným podfondem Fondu k datu účetní závěrky je Fond Next Gen Responsibility, podfond.' První (prodloužené) účetní období 12. 8. 2024 – 30. 6. 2025.\", \"provenance\": {\"origin\": \"emergency_enrichment\", \"stage\": \"13\", \"d"
+  ]
+ },
+ "Max Development Fond SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-06-04/2024-12-31"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   " roli administrátora a obhospodařovatele Fondu a jeho jediného podfondu – Max Development podfond'. První (částečné) účetní období 4. 6. – 31. 12. 2024.\", \"as_of\": \"2024-12-31\"}",
+   "kind\": \"not_applied\", \"fund\": \"Max Development Fond SICAV a.s.\", \"field\": \"aum_history\", \"reason\": \"První (částečné) účetní období 4. 6. – 31. 12. 2024; srovnávací období neexistuje.\", \"source\": \"https://or.justice.cz/ias",
+   "kind\": \"not_applied\", \"fund\": \"Max Development Fond SICAV a.s.\", \"field\": \"aum_history\", \"reason\": \"První (částečné) účetní období 4. 6. – 31. 12. 2024; srovnávací období neexistuje.\", \"source\": \"https://or.justice.cz/ias",
+   " roli administrátora a obhospodařovatele Fondu a jeho jediného podfondu – Max Development podfond'. První (částečné) účetní období 4. 6. – 31. 12. 2024.\", \"as_of\": \"2024-12-31\"}",
+   " roli administrátora a obhospodařovatele Fondu a jeho jediného podfondu – Max Development podfond'. První (částečné) účetní období 4. 6. – 31. 12. 2024.\", \"provenance\": {\"origin\": \"emergency_enrichment\", \"stage\": \"13\", \"d"
+  ]
+ },
+ "Aurelia fondy SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-11-07/2025-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   ": \"Statut, 'Seznam podfondů': jediným podfondem je Aurelia nemovitostní fond SMS & Axelor, podfond. První účetní období je prodloužené (7. 11. 2024 – 31. 12. 2025).\", \"as_of\": \"2025-12-31\"}",
+   "{\"kind\": \"not_applied\", \"fund\": \"Aurelia fondy SICAV a.s.\", \"field\": \"annual_returns\", \"reason\": \"První účetní období podfondu je prodloužené (7. 11. 2024 – 31. 12. 2025). Zpráva sice v komentáři uvádí 'celoroční výkonnost 10,51 %' za rok ",
+   "{\"kind\": \"not_applied\", \"fund\": \"Aurelia fondy SICAV a.s.\", \"field\": \"annual_returns\", \"reason\": \"První účetní období podfondu je prodloužené (7. 11. 2024 – 31. 12. 2025). Zpráva sice v komentáři uvádí 'celoroční výkonnost 10,51 %' za rok ",
+   ": \"Statut, 'Seznam podfondů': jediným podfondem je Aurelia nemovitostní fond SMS & Axelor, podfond. První účetní období je prodloužené (7. 11. 2024 – 31. 12. 2025).\", \"as_of\": \"2025-12-31\"}",
+   ": \"Statut, 'Seznam podfondů': jediným podfondem je Aurelia nemovitostní fond SMS & Axelor, podfond. První účetní období je prodloužené (7. 11. 2024 – 31. 12. 2025).\", \"provenance\": {\"origin\": \"emergency_enrichment\", \"stage\": \"13\", \""
+  ]
+ },
+ "Czech Stability Fund SICAV a.s.": {
+  "establishment_dates": [
+   "2024-08-22"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   " \"fund\": \"Czech Stability Fund SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 22. 8. 2024 a ve Sbírce listin je jediná listina – zakladatelský notářský zápis s",
+   " \"fund\": \"Czech Stability Fund SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 22. 8. 2024 a ve Sbírce listin je jediná listina – zakladatelský notářský zápis s"
+  ]
+ },
+ "AGROCORE SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-12-09"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "t_applied\", \"fund\": \"AGROCORE SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 9. 12. 2025; jedinou listinou ve Sbírce listin je zakladatelský notářský zápis se",
+   "t_applied\", \"fund\": \"AGROCORE SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 9. 12. 2025; jedinou listinou ve Sbírce listin je zakladatelský notářský zápis se"
+  ]
+ },
+ "ALFAMET ENERGY SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [
+   "2025"
+  ],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   " \"not_applied\", \"fund\": \"ALFAMET ENERGY SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond zapsán 2025 (B 11670 KS Ostrava, IČO 238 35 231); jediný zápis ve Sbírce listin j",
+   "{\"fund\": \"ALFAMET ENERGY SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond zapsán 2025 (B 11670 KS Ostrava, IČO 238 35 231); jediný zápis ve Sbírce listin j"
+  ]
+ },
+ "Luxent Fund SICAV a.s.": {
+  "establishment_dates": [
+   "2025-02-03",
+   "2025-02-12"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "pe_type\": \"subfund\", \"condition\": \"fond má jediný podfond — Luxent Fund SICAV nemovitostní podfond (zapsán do seznamu ČNB 12. 2. 2025)\", \"page\": null}",
+   "d SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond byl založen 3. 2. 2025 a podfond zapsán do seznamu ČNB 12. 2. 2025; ve Sbírce listin nejsou uloženy žádné účetní závěrky (jen SL1–SL3 no",
+   "applied\", \"fund\": \"Luxent Fund SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond byl založen 3. 2. 2025 a podfond zapsán do seznamu ČNB 12. 2. 2025; ve Sbírce listin nejsou ",
+   "d SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond byl založen 3. 2. 2025 a podfond zapsán do seznamu ČNB 12. 2. 2025; ve Sbírce listin nejsou uloženy žádné účetní závěrky (jen SL1–SL3 no",
+   "{\"fund\": \"Luxent Fund SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond byl založen 3. 2. 2025 a podfond zapsán do seznamu ČNB 12. 2. 2025; ve Sbírce listin nejsou "
+  ]
+ },
+ "CCD FOOD SICAV, a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-07-30/2024-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   "OD 1; „Veškerá činnost Fondu probíhá na jeho Podfondu“, vlastní jmění fondu je skořápka 55 tis. Kč; první účetní období fondu bylo neúplné (30. 7. – 31. 12. 2024)\", \"page\": null}",
+   "OD 1; „Veškerá činnost Fondu probíhá na jeho Podfondu“, vlastní jmění fondu je skořápka 55 tis. Kč; první účetní období fondu bylo neúplné (30. 7. – 31. 12. 2024)\", \"page\": null}",
+   "OD 1; „Veškerá činnost Fondu probíhá na jeho Podfondu“, vlastní jmění fondu je skořápka 55 tis. Kč; první účetní období fondu bylo neúplné (30. 7. – 31. 12. 2024)\", \"provenance\": {\"origin\": \"emergency_enrichment\", \"stage\": \"14\", \"d"
+  ]
+ },
+ "Satoshi Bridge Fond SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [
+   "2025"
+  ],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   ", \"fund\": \"Satoshi Bridge Fond SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond byl zapsán v roce 2025 (B 30100) a vlastní dokument uvádí „Spuštění 1. 7. 2026“; ve Sbírce l",
+   "{\"fund\": \"Satoshi Bridge Fond SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond byl zapsán v roce 2025 (B 30100) a vlastní dokument uvádí „Spuštění 1. 7. 2026“; ve Sbírce l"
+  ]
+ },
+ "Spinnaker SICAV, a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2022-10-27/2023-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   "ní změna; dva podfondy, u Polaris Alpha se navíc třídy PIA a VIA vyvíjejí odlišně a Polaris Beta má první (prodloužené) účetní období 27. 10. 2022 – 31. 12. 2023\", \"source\": \"https://or.justice.cz/ias/ui/vypis-sl-detail?dokument=87",
+   "ní změna; dva podfondy, u Polaris Alpha se navíc třídy PIA a VIA vyvíjejí odlišně a Polaris Beta má první (prodloužené) účetní období 27. 10. 2022 – 31. 12. 2023\", \"source\": \"https://or.justice.cz/ias/ui/vypis-sl-detail?dokument=87"
+  ]
+ },
+ "Zephyr Investments SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-12-27"
+  ],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-12-27/2025-12-31"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   "s\": \"FUND\", \"scope_type\": \"fund\", \"condition\": \"fond bez podfondů; Ostatní jmění 412 EUR vyloučeno; první (prodloužené) účetní období 27. 12. 2024 – 31. 12. 2025, srovnávací sloupec je nulový\", \"page\": 10}",
+   "nd\": \"not_applied\", \"fund\": \"Zephyr Investments SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"první účetní období 27. 12. 2024 – 31. 12. 2025 je prodloužené a srovnávací sloupec je prázdný (Změna v % není vytišt",
+   "\": \"not_applied\", \"fund\": \"Zephyr Investments SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"fond vznikl 27. 12. 2024; srovnávací období je nulové, existuje jediné pozorování\", \"source\": ",
+   "{\"fund\": \"Zephyr Investments SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"fond vznikl 27. 12. 2024; srovnávací období je nulové, existuje jediné pozorování\", \"source\": ",
+   "{\"fund\": \"Zephyr Investments SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"první účetní období 27. 12. 2024 – 31. 12. 2025 je prodloužené a srovnávací sloupec je prázdný (Změna v % není vytišt"
+  ]
+ },
+ "Ambeat Care nemovitostní fond SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-06-21"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "pe_type\": \"subfund\", \"condition\": \"Podfond Ambeat Care je jediný podfond; první účetní období, fond zapsán 21. 6. 2024\", \"page\": null}",
+   "t Care nemovitostní fond SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"první účetní období (fond zapsán 21. 6. 2024); tabulka Srovnání za 3 uplynulá účetní období uvádí pro 2022 a 2023 ",
+   "t Care nemovitostní fond SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"první účetní období (fond zapsán 21. 6. 2024); tabulka Srovnání za 3 uplynulá účetní období uvádí pro 2022 a 2023 ",
+   "pe_type\": \"subfund\", \"condition\": \"Podfond Ambeat Care je jediný podfond; první účetní období, fond zapsán 21. 6. 2024\", \"page\": null}",
+   "ss\": \"SOLE_SUBFUND\", \"condition\": \"Podfond Ambeat Care je jediný podfond; první účetní období, fond zapsán 21. 6. 2024\", \"provenance\": {\"origin\": \"emergency_enrichment\", \"stage\": \"15\", \"de"
+  ]
+ },
+ "Pro arte, investiční fond s proměnným základním kapitálem, a.s.": {
+  "establishment_dates": [
+   "2017-12-04"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "ční fond s proměnným základním kapitálem, a.s. (IČO 242 47 464, sp. zn. B 18380; úplný výpis: název zapsán 4. 12. 2017, vymazán 31. 7. 2026). Ve sbírce listin je dále projekt přeměny (29. ",
+   "ční fond s proměnným základním kapitálem, a.s. (IČO 242 47 464, sp. zn. B 18380; úplný výpis: název zapsán 4. 12. 2017, vymazán 31. 7. 2026). Ve sbírce listin je dále projekt přeměny (29. ",
+   "ční fond s proměnným základním kapitálem, a.s. (IČO 242 47 464, sp. zn. B 18380; úplný výpis: název zapsán 4. 12. 2017, vymazán 31. 7. 2026). Ve sbírce listin je dále projekt přeměny (29. "
+  ]
+ },
+ "Aspire 11 Capital SICAV, a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [
+   "2025"
+  ],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "t_applied\", \"fund\": \"Aspire 11 Capital SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond zapsán 2025 (IČO 236 20 030, B 29922); ve sbírce listin je jediný dokument — zakl",
+   "{\"fund\": \"Aspire 11 Capital SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond zapsán 2025 (IČO 236 20 030, B 29922); ve sbírce listin je jediný dokument — zakl"
+  ]
+ },
+ "CCM SICAV II a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [
+   "2025"
+  ],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "{\"kind\": \"not_applied\", \"fund\": \"CCM SICAV II a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond zapsán 2025 (IČO 235 95 493, B 29896); ve sbírce listin je jediný dokument — zakl",
+   "te\": \"DELTA IS panel: statut z 27. 8. 2025 — třídně nezávislá část poplatkového schématu jako fees; fond zapsán 2025, v rejstříku jen zakladatelský notářský zápis, takže žádné účetní úda",
+   "te\": \"DELTA IS panel: statut z 27. 8. 2025 — třídně nezávislá část poplatkového schématu jako fees; fond zapsán 2025, v rejstříku jen zakladatelský notářský zápis, takže žádné účetní úda",
+   "{\"fund\": \"CCM SICAV II a.s.\", \"field\": \"assets_under_management\", \"reason\": \"fond zapsán 2025 (IČO 235 95 493, B 29896); ve sbírce listin je jediný dokument — zakl"
+  ]
+ },
+ "JRD Eco Fund SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2025-08-11/2025-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   "{\"kind\": \"not_applied\", \"fund\": \"JRD Eco Fund SICAV a.s.\", \"field\": \"aum_history\", \"reason\": \"první účetní období Fondu 11. 8. – 31. 12. 2025 a Podfondu 8. 9. – 31. 12. 2025; sloupec předcházejícího období je N/",
+   "{\"kind\": \"not_applied\", \"fund\": \"JRD Eco Fund SICAV a.s.\", \"field\": \"aum_history\", \"reason\": \"první účetní období Fondu 11. 8. – 31. 12. 2025 a Podfondu 8. 9. – 31. 12. 2025; sloupec předcházejícího období je N/"
+  ]
+ },
+ "JASMINUM SICAV a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2025-06-19/2025-12-31"
+  ],
+  "no_prior_period": true,
+  "quotes": [
+   "{\"kind\": \"not_applied\", \"fund\": \"JASMINUM SICAV a.s.\", \"field\": \"annual_returns\", \"reason\": \"první účetní období Fondu i podfondu je 19. 6. 2025 - 31. 12. 2025, tedy ne kalendářní rok, a srovnávací období neexistuje\", \"source\": \"",
+   "e první strany): informační list → fund-level minimum 1 mil. Kč; cílený výnos je třídní; VZ 2025 za první období 19. 6. - 31. 12. 2025 neumožňuje roční výnos ani řadu hodnot akcie\", \"sources\": [\"jasminumf",
+   "{\"kind\": \"not_applied\", \"fund\": \"JASMINUM SICAV a.s.\", \"field\": \"annual_returns\", \"reason\": \"první účetní období Fondu i podfondu je 19. 6. 2025 - 31. 12. 2025, tedy ne kalendářní rok, a srovnávací období neexistuje\", \"source\": \"",
+   "e první strany): informační list → fund-level minimum 1 mil. Kč; cílený výnos je třídní; VZ 2025 za první období 19. 6. - 31. 12. 2025 neumožňuje roční výnos ani řadu hodnot akcie\", \"sources\": [\"jasminumf"
+  ]
+ },
+ "BHS Energy & Battery Fund SICAV a.s.": {
+  "establishment_dates": [
+   "2024-10-16"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "nel Versute IS nezveřejňuje žádnou výroční zprávu a rejstřík obsahuje jen dva notářské zápisy (fond zapsán 16. 10. 2024)\", \"source\": \"https://versuteis.cz/wp-content/uploads/2026/05/2026-In",
+   "\"note\": \"Versute panel (?page_id=1470) + rejstřík (subjektId 1256998, jen dva notářské zápisy, fond zapsán 16. 10. 2024): fond dosud nezveřejnil účetní závěrku ani historické údaje - nulový",
+   "nel Versute IS nezveřejňuje žádnou výroční zprávu a rejstřík obsahuje jen dva notářské zápisy (fond zapsán 16. 10. 2024)\", \"source\": \"https://versuteis.cz/wp-content/uploads/2026/05/2026-In",
+   "\"note\": \"Versute panel (?page_id=1470) + rejstřík (subjektId 1256998, jen dva notářské zápisy, fond zapsán 16. 10. 2024): fond dosud nezveřejnil účetní závěrku ani historické údaje - nulový"
+  ]
+ },
+ "Green Ruby SICAV, a.s.": {
+  "establishment_dates": [
+   "2026-04-20"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "\"fund\": \"Green Ruby SICAV, a.s.\", \"field\": \"investment_horizon\", \"reason\": \"Fond byl do seznamu ČNB zapsán 20. 4. 2026 a jeho podfond 30. 4. 2026; na webu obhospodařovatele zatím nemá vlas",
+   "\"fund\": \"Green Ruby SICAV, a.s.\", \"field\": \"minimum_investment\", \"reason\": \"Fond byl do seznamu ČNB zapsán 20. 4. 2026 a jeho podfond 30. 4. 2026; na webu obhospodařovatele zatím nemá vlas",
+   ": 3, \"fund\": \"Green Ruby SICAV, a.s.\", \"field\": \"target_return\", \"reason\": \"Fond byl do seznamu ČNB zapsán 20. 4. 2026 a jeho podfond 30. 4. 2026; na webu obhospodařovatele zatím nemá vlas",
+   "eue_rank\": 3, \"fund\": \"Green Ruby SICAV, a.s.\", \"field\": \"fees\", \"reason\": \"Fond byl do seznamu ČNB zapsán 20. 4. 2026 a jeho podfond 30. 4. 2026; na webu obhospodařovatele zatím nemá vlas",
+   "\": \"Green Ruby SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl do seznamu ČNB zapsán 20. 4. 2026 a jeho podfond 30. 4. 2026; na webu obhospodařovatele zatím nemá vlas"
+  ]
+ },
+ "Ta Meri Invest SICAV, a.s.": {
+  "establishment_dates": [
+   "2026-01-16"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "on\", \"reason\": \"Retry přes oficiální hub AVANT proběhl a nic neodemkl, protože fond je příliš nový. Zapsán 16. 1. 2026 (IČO 243 81 896, B 30415); blok „Podfond, Ta Meri Automotive“ na hubu",
+   "nt\", \"reason\": \"Retry přes oficiální hub AVANT proběhl a nic neodemkl, protože fond je příliš nový. Zapsán 16. 1. 2026 (IČO 243 81 896, B 30415); blok „Podfond, Ta Meri Automotive“ na hubu",
+   "rn\", \"reason\": \"Retry přes oficiální hub AVANT proběhl a nic neodemkl, protože fond je příliš nový. Zapsán 16. 1. 2026 (IČO 243 81 896, B 30415); blok „Podfond, Ta Meri Automotive“ na hubu",
+   "es\", \"reason\": \"Retry přes oficiální hub AVANT proběhl a nic neodemkl, protože fond je příliš nový. Zapsán 16. 1. 2026 (IČO 243 81 896, B 30415); blok „Podfond, Ta Meri Automotive“ na hubu",
+   "nt\", \"reason\": \"Retry přes oficiální hub AVANT proběhl a nic neodemkl, protože fond je příliš nový. Zapsán 16. 1. 2026 (IČO 243 81 896, B 30415); blok „Podfond, Ta Meri Automotive“ na hubu"
+  ]
+ },
+ "Numero Fund SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-12-04"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   ", \"reason\": \"Fond přestal být fondem. Úplný výpis z OR (subjektId 1299810, IČO 240 31 976) ukazuje: zapsán 4. 12. 2025 jako „Numero Fund SICAV, a.s.“ s AVANT investiční společností, a.s. j",
+   ", \"reason\": \"Fond přestal být fondem. Úplný výpis z OR (subjektId 1299810, IČO 240 31 976) ukazuje: zapsán 4. 12. 2025 jako „Numero Fund SICAV, a.s.“ s AVANT investiční společností, a.s. j",
+   ", \"reason\": \"Fond přestal být fondem. Úplný výpis z OR (subjektId 1299810, IČO 240 31 976) ukazuje: zapsán 4. 12. 2025 jako „Numero Fund SICAV, a.s.“ s AVANT investiční společností, a.s. j",
+   ", \"reason\": \"Fond přestal být fondem. Úplný výpis z OR (subjektId 1299810, IČO 240 31 976) ukazuje: zapsán 4. 12. 2025 jako „Numero Fund SICAV, a.s.“ s AVANT investiční společností, a.s. j",
+   ", \"reason\": \"Fond přestal být fondem. Úplný výpis z OR (subjektId 1299810, IČO 240 31 976) ukazuje: zapsán 4. 12. 2025 jako „Numero Fund SICAV, a.s.“ s AVANT investiční společností, a.s. j"
+  ]
+ },
+ "AVANT BESS SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-09-16"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": true,
+  "quotes": [
+   "a) částku 100 000 Kč … b) částku 1 000 000 Kč …“.\", \"review_required\": true, \"condition\": \"Fond byl zapsán 16. 9. 2025 a v rejstříku dosud nemá výroční zprávu, která by počet podfondů potv",
+   "ank\": 19, \"fund\": \"AVANT BESS SICAV, a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán 16. 9. 2025 (B 29971 MSPH, IČO 237 30 170); Sbírka listin obsahuje pouze notářské",
+   "t\", \"queue_rank\": 19, \"fund\": \"AVANT BESS SICAV, a.s.\", \"field\": \"aum_history\", \"reason\": \"Fond byl zapsán 16. 9. 2025 (B 29971 MSPH, IČO 237 30 170); Sbírka listin obsahuje pouze notářské",
+   " \"queue_rank\": 19, \"fund\": \"AVANT BESS SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"Fond byl zapsán 16. 9. 2025 (B 29971 MSPH, IČO 237 30 170); Sbírka listin obsahuje pouze notářské",
+   "ueue_rank\": 19, \"fund\": \"AVANT BESS SICAV, a.s.\", \"field\": \"historical_values\", \"reason\": \"Fond byl zapsán 16. 9. 2025 (B 29971 MSPH, IČO 237 30 170); Sbírka listin obsahuje pouze notářské"
+  ]
+ },
+ "ASCAVIA SICAV a.s.": {
+  "establishment_dates": [
+   "2025-06-04"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "ue_rank\": 14, \"fund\": \"ASCAVIA SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl zapsán do obchodního rejstříku 4. 6. 2025 (B 29757 MSPH, IČO 233 53 902). Sbírka listin obsahuje pouze zakladat",
+   "bsent\", \"queue_rank\": 14, \"fund\": \"ASCAVIA SICAV a.s.\", \"field\": \"aum_history\", \"reason\": \"Fond byl zapsán do obchodního rejstříku 4. 6. 2025 (B 29757 MSPH, IČO 233 53 902). Sbírka listin obsahuje pouze zakladat",
+   "nt\", \"queue_rank\": 14, \"fund\": \"ASCAVIA SICAV a.s.\", \"field\": \"annual_returns\", \"reason\": \"Fond byl zapsán do obchodního rejstříku 4. 6. 2025 (B 29757 MSPH, IČO 233 53 902). Sbírka listin obsahuje pouze zakladat",
+   ", \"queue_rank\": 14, \"fund\": \"ASCAVIA SICAV a.s.\", \"field\": \"historical_values\", \"reason\": \"Fond byl zapsán do obchodního rejstříku 4. 6. 2025 (B 29757 MSPH, IČO 233 53 902). Sbírka listin obsahuje pouze zakladat",
+   ", \"queue_rank\": 14, \"fund\": \"ASCAVIA SICAV a.s.\", \"field\": \"historical_values\", \"reason\": \"Fond byl zapsán do obchodního rejstříku 4. 6. 2025 (B 29757 MSPH, IČO 233 53 902). Sbírka listin obsahuje pouze zakladat"
+  ]
+ },
+ "GAMA SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-02-14"
+  ],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-02-14/2024-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   " 3 435 035“.\", \"review_required\": false, \"condition\": \"Řada má jen dvě pozorování, protože fond byl zapsán 14. 2. 2024 a jeho první účetní období bylo 14. 2. – 31. 12. 2024.\", \"scope\": \"SO",
+   "uired\": false, \"condition\": \"Řada má jen dvě pozorování, protože fond byl zapsán 14. 2. 2024 a jeho první účetní období bylo 14. 2. – 31. 12. 2024.\", \"scope\": \"SOLE_SUBFUND\", \"as_of\": \"2025-12-31\", \"produced_by\": \"ai",
+   " 3 435 035“.\", \"review_required\": false, \"condition\": \"Řada má jen dvě pozorování, protože fond byl zapsán 14. 2. 2024 a jeho první účetní období bylo 14. 2. – 31. 12. 2024.\", \"scope\": \"SO",
+   "uired\": false, \"condition\": \"Řada má jen dvě pozorování, protože fond byl zapsán 14. 2. 2024 a jeho první účetní období bylo 14. 2. – 31. 12. 2024.\", \"scope\": \"SOLE_SUBFUND\", \"as_of\": \"2025-12-31\", \"produced_by\": \"ai"
+  ]
+ },
+ "JTFG FUND II SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-02-26",
+   "2025-07-22"
+  ],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-02-26/2024-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   "pozorování jsou tištěné součty CELKEM, nikoli dopočty. Řada má jen dvě pozorování, protože fond byl zapsán 26. 2. 2024 a jeho první účetní období bylo 26. 2. – 31. 12. 2024.\", \"scope\": \"FU",
+   "učty CELKEM, nikoli dopočty. Řada má jen dvě pozorování, protože fond byl zapsán 26. 2. 2024 a jeho první účetní období bylo 26. 2. – 31. 12. 2024.\", \"scope\": \"FUND\", \"as_of\": \"2025-12-31\", \"produced_by\": \"ai_review\"",
+   "pozorování jsou tištěné součty CELKEM, nikoli dopočty. Řada má jen dvě pozorování, protože fond byl zapsán 26. 2. 2024 a jeho první účetní období bylo 26. 2. – 31. 12. 2024.\", \"scope\": \"FU",
+   "učty CELKEM, nikoli dopočty. Řada má jen dvě pozorování, protože fond byl zapsán 26. 2. 2024 a jeho první účetní období bylo 26. 2. – 31. 12. 2024.\", \"scope\": \"FUND\", \"as_of\": \"2025-12-31\", \"produced_by\": \"ai_review\"",
+   "JTFG FUND III SICAV, a.s. — 1  Entered 22 July 2025, first accounting period **22. 7. – 31. 12. 2025**, total assets at t"
+  ]
+ },
+ "Direct PRO SICAV investiční fond, a.s.": {
+  "establishment_dates": [],
+  "establishment_years": [],
+  "first_periods": [
+   "2024-09-17/2024-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   "024“, tatáž tabulka.\", \"review_required\": false, \"condition\": \"Pozorování NEJSOU ročním intervalem: první účetní období fondu bylo 17. 9. – 31. 12. 2024, druhé prodloužené 1. 1. 2025 – 31. 3. 2026 (15 měsíců). Data jsou př",
+   "024“, tatáž tabulka.\", \"review_required\": false, \"condition\": \"Pozorování NEJSOU ročním intervalem: první účetní období fondu bylo 17. 9. – 31. 12. 2024, druhé prodloužené 1. 1. 2025 – 31. 3. 2026 (15 měsíců). Data jsou př"
+  ]
+ },
+ "ENERN Investments, investiční fond s proměnným základním kapitálem, a.s.": {
+  "establishment_dates": [
+   "2016-06-22",
+   "2020-07-01"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   " \"Fond vytvořil DVA podfondy — Podfond ENERN TECH III (zapsán 22. 6. 2016) a Podfond ENERN TECH IV (vznik 1. 7. 2020). Výroční zpráva tiskne jejich aktiva odděleně („aktiva předaná k obh",
+   "\"field\": \"assets_under_management\", \"reason\": \"Fond vytvořil DVA podfondy — Podfond ENERN TECH III (zapsán 22. 6. 2016) a Podfond ENERN TECH IV (vznik 1. 7. 2020). Výroční zpráva tiskne je",
+   " \"Fond vytvořil DVA podfondy — Podfond ENERN TECH III (zapsán 22. 6. 2016) a Podfond ENERN TECH IV (vznik 1. 7. 2020). Výroční zpráva tiskne jejich aktiva odděleně („aktiva předaná k obh",
+   "lem, a.s.\", \"field\": \"aum_history\", \"reason\": \"Fond vytvořil DVA podfondy — Podfond ENERN TECH III (zapsán 22. 6. 2016) a Podfond ENERN TECH IV (vznik 1. 7. 2020). Výroční zpráva tiskne je",
+   " \"Fond vytvořil DVA podfondy — Podfond ENERN TECH III (zapsán 22. 6. 2016) a Podfond ENERN TECH IV (vznik 1. 7. 2020). Výroční zpráva tiskne jejich aktiva odděleně („aktiva předaná k obh"
+  ]
+ },
+ "Trigema Fund SICAV a.s.": {
+  "establishment_dates": [
+   "2025-09-16"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "u, nikoli o statutární nebo smluvní závazek; statut podfondu žádnou číselnou hodnotu netiskne. Fond vznikl 16. 9. 2025 a k 31. 3. 2026 neměl vydané žádné investiční akcie, takže cíl není p",
+   "sent\", \"queue_rank\": 40, \"fund\": \"Trigema Fund SICAV a.s.\", \"field\": \"aum_history\", \"reason\": \"Fond vznikl 16. 9. 2025 a má jediné, zkrácené účetní období do 31. 3. 2026; existuje tak jedi",
+   "sent\", \"queue_rank\": 40, \"fund\": \"Trigema Fund SICAV a.s.\", \"field\": \"aum_history\", \"reason\": \"Fond vznikl 16. 9. 2025 a má jediné, zkrácené účetní období do 31. 3. 2026; existuje tak jedi",
+   "u, nikoli o statutární nebo smluvní závazek; statut podfondu žádnou číselnou hodnotu netiskne. Fond vznikl 16. 9. 2025 a k 31. 3. 2026 neměl vydané žádné investiční akcie, takže cíl není p",
+   "Trigema Fund SICAV a.s. — 2  Entered 16 September 2025 and already reporting: an audited annual report for **16. 9. 2025 – 3"
+  ]
+ },
+ "Mauricius SICAV a.s.": {
+  "establishment_dates": [
+   "2025-07-21"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "ricius SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl do obchodního rejstříku zapsán 21. 7. 2025 a Sbírka listin obsahuje jedinou listinu (notářský zápis a stanovy). ",
+   "sent\", \"queue_rank\": 31, \"fund\": \"Mauricius SICAV a.s.\", \"field\": \"annual_returns\", \"reason\": \"Fond vznikl 21. 7. 2025; první účetní období dosud nebylo uzavřeno žádnou zveřejněnou zprávou",
+   "sent\", \"queue_rank\": 31, \"fund\": \"Mauricius SICAV a.s.\", \"field\": \"annual_returns\", \"reason\": \"Fond vznikl 21. 7. 2025; první účetní období dosud nebylo uzavřeno žádnou zveřejněnou zprávou",
+   "ricius SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl do obchodního rejstříku zapsán 21. 7. 2025 a Sbírka listin obsahuje jedinou listinu (notářský zápis a stanovy). ",
+   "Mauricius SICAV a.s. — 0  The batch's only fund with no gain, and the first since batch 02. Entered 21 July 2025; the Sbírka listin holds **one** filing (B 29862/SL1/MSPH, a notarial"
+  ]
+ },
+ "JTFG FUND III SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-07-22"
+  ],
+  "establishment_years": [],
+  "first_periods": [
+   "2025-07-22/2025-12-31"
+  ],
+  "no_prior_period": false,
+  "quotes": [
+   "sent\", \"queue_rank\": 37, \"fund\": \"JTFG FUND III SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"První účetní období je 22. 7. – 31. 12. 2025, tedy nikoli kalendářní rok, a fond nevykázal žádnou výkonnost.\", \"so",
+   "sent\", \"queue_rank\": 37, \"fund\": \"JTFG FUND III SICAV, a.s.\", \"field\": \"annual_returns\", \"reason\": \"První účetní období je 22. 7. – 31. 12. 2025, tedy nikoli kalendářní rok, a fond nevykázal žádnou výkonnost.\", \"so",
+   "JTFG FUND III SICAV, a.s. — 1  Entered 22 July 2025, first accounting period **22. 7. – 31. 12. 2025**, total assets at t"
+  ]
+ },
+ "Spinoffy SICAV a.s.": {
+  "establishment_dates": [
+   "2025-11-28"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "inoffy SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl do obchodního rejstříku zapsán 28. 11. 2025 a Sbírka listin obsahuje pouze tři zakladatelské listiny; žádná výroč",
+   "inoffy SICAV a.s.\", \"field\": \"assets_under_management\", \"reason\": \"Fond byl do obchodního rejstříku zapsán 28. 11. 2025 a Sbírka listin obsahuje pouze tři zakladatelské listiny; žádná výroč",
+   "Spinoffy SICAV a.s. — 4  Entered 28 November 2025, no annual report, and its statute on the AMISTA hub is a **scan with"
+  ]
+ },
+ "4 Gimel Investments SICAV, a.s.": {
+  "establishment_dates": [
+   "2018-03-22"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "subfund's own row on the AVANT hub: „Název Podfondu Podfond Alfa 4 Gimel Investments, NID 75160773, vznik 22. 3. 2018“; the fund's own row confirms „Podfondy vytvořené Fondem: Podfond Alf",
+   "subfund's own row on the AVANT hub: „Název Podfondu Podfond Alfa 4 Gimel Investments, NID 75160773, vznik 22. 3. 2018“; the fund's own row confirms „Podfondy vytvořené Fondem: Podfond Alf"
+  ]
+ },
+ "JTPEG INVESTMENTS FUND I SICAV, a.s.": {
+  "establishment_dates": [
+   "2023-06-22"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "dnota 49 466 tis. EUR (aktiva 242 784 tis. EUR individuálně / 298 545 tis. EUR konsolidovaně). Fond vznikl 22. 6. 2023, jde tedy o první účetní období; novější výroční zpráva nebyla na web",
+   "dnota 49 466 tis. EUR (aktiva 242 784 tis. EUR individuálně / 298 545 tis. EUR konsolidovaně). Fond vznikl 22. 6. 2023, jde tedy o první účetní období; novější výroční zpráva nebyla na web"
+  ]
+ },
+ "Robot Asset Management SICAV a.s.": {
+  "establishment_dates": [
+   "2024-03-11"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "330 736“.\", \"rationale\": \"Fond vyčlenil veškerou investiční činnost do dvou podfondů — QUANT a 10X (vznik 11. 3. 2024, NID 75164680, vlastní samostatná výroční zpráva). Hodnota se týká po",
+   "], \"residual_gap_reason\": \"Fond vyčlenil veškerou investiční činnost do dvou podfondů (QUANT a 10X, vznik 11. 3. 2024). Doložené hodnoty — čistá aktiva 330 736 tis. Kč, poplatkový režim z",
+   "330 736“.\", \"rationale\": \"Fond vyčlenil veškerou investiční činnost do dvou podfondů — QUANT a 10X (vznik 11. 3. 2024, NID 75164680, vlastní samostatná výroční zpráva). Hodnota se týká po"
+  ]
+ },
+ "FWG atlantiso SICAV, a.s.": {
+  "establishment_dates": [
+   "2024-06-03"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "í 130 631 tis. Kč — Stav k poslednímu dni Účetního období 162 822 tis. Kč“.\", \"rationale\": \"Podfond vznikl 3. 6. 2024, předcházející účetní období proto končí 31. 12. 2024; sloupce jsou v",
+   "d)\", \"identity_evidence\": \"Táž výroční zpráva 2025 podfondu (NID 75164795).\", \"rationale\": \"Podfond vznikl 3. 6. 2024, předcházející účetní období proto končí 31. 12. 2024; sloupce jsou v"
+  ]
+ },
+ "Cleverin SICAV a.s.": {
+  "establishment_dates": [
+   "2024-08-26"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "08052982, 2 349 985 170 ks) a NAV je jí ze 100 % přiřazeno. Za rok 2024 výnos uveden není — podfond vznikl 26. 8. 2024, období bylo zkrácené.\", \"as_of\": \"2026-08-16\", \"review_required\": fa",
+   "a 2025 uvádí „Podfondy vytvořené Fondem: Podfond Cleverin Assets“ (jediný).\", \"condition\": \"Podfond vznikl 26. 8. 2024, starší pozorování neexistuje.\", \"as_of\": \"2026-08-16\", \"review_requi"
+  ]
+ },
+ "JTFG FUND I SICAV, a.s.": {
+  "establishment_dates": [
+   "2025-07-22"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "JTFG FUND III SICAV, a.s. — 1  Entered 22 July 2025, first accounting period **22. 7. – 31. 12. 2025**, total assets at t"
+  ]
+ },
+ "PONTIRO FOND SICAV a.s.": {
+  "establishment_dates": [
+   "2025-08-24"
+  ],
+  "establishment_years": [],
+  "first_periods": [],
+  "no_prior_period": false,
+  "quotes": [
+   "PONTIRO FOND SICAV a.s. — 2  Entered 24 August 2025 and **not yet investing**: the 2025 financial statements filed via th"
+  ]
+ }
+}
