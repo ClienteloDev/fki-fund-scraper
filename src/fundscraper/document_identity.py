@@ -84,7 +84,16 @@ class DocumentIdentity:
 
 @dataclass(frozen=True, slots=True)
 class IdentityInput:
-    """Everything the decision is allowed to look at."""
+    """
+    Everything the decision is allowed to look at.
+
+    The scope discovery assigned in step 5 is deliberately absent. It
+    records which crawl reached a document, which is a fact about the
+    run and not about the document, and every fund crawled from a
+    shared host carries the same one. It was carried here unread; a
+    reader that mistook it for evidence would attribute every page of a
+    manager to whichever fund the crawl happened to be serving.
+    """
 
     fund_name: str
     fund_ico: str | None = None
@@ -93,7 +102,6 @@ class IdentityInput:
     repeated_text: str = ""
     metadata_text: str = ""
     body_text: str = ""
-    discovery_scope: str | None = None
 
 
 ICO_PATTERN: Final = re.compile(

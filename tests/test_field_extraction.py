@@ -20,7 +20,13 @@ from fundscraper.output_models import (
 
 
 def test_extracts_all_supported_fields() -> None:
+    # The memorandum names its fund on its title page, as a real one does.
+    # Without that the source proves no identity, and the host of the URL
+    # is deliberately not allowed to stand in for it.
     text = """
+    Example SICAV a.s.
+    Investiční memorandum
+
     Doporučený investiční horizont je 5 let.
 
     Minimální investice činí 1 000 000 Kč.

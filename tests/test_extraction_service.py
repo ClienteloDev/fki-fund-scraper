@@ -70,7 +70,11 @@ def test_extracts_and_updates_output_file(
         local_path="cache/http/example.body",
     )
 
+    # The KID names the fund it prices. The host of the URL is not allowed
+    # to stand in for that, so the document has to carry its own identity.
     text = """
+    Example SICAV a.s.
+    Sdělení klíčových informací
     Doporučený investiční horizont je 5 let.
     Minimální investice činí 1 000 000 Kč.
     Cílový výnos je 8 % p.a.

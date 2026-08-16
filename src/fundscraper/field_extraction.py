@@ -3069,7 +3069,7 @@ def classify_source_scope(
         " ".join(
             (
                 source_title or "",
-                source_url,
+                url_identity_text(source_url),
                 document_text[:IDENTITY_TEXT_CHARACTERS],
             )
         )
@@ -3123,15 +3123,20 @@ def classify_source_scope(
         # The document states a legal fund name and it is not this one.
         return SourceScope.OTHER_FUND
 
-    if _identifies_fund(
-        fund_tokens=fund_tokens,
-        text=identity_text,
-    ):
+    if owns_the_page:
+        # The source is filed under an address that spells this fund out
+        # and no other. That is the fund's own panel or document folder on
+        # a shared hub, which is the one place outside the text of a
+        # document where an attribution is explicit rather than inferred.
         return _confirmed_scope(
             identity_text=identity_text,
             normalized_quote=normalized_quote,
         )
 
+    # Nothing states whose source this is. Being reached from the canonical
+    # website, sitting on the fund's own host or carrying a scattering of
+    # the words of its name are all properties of the crawl, not of the
+    # document, and a fund is not entitled to a value on any of them.
     return SourceScope.GENERIC
 
 
@@ -3549,25 +3554,23 @@ def _named_fund_matches(
     )
 
 
-def _identifies_fund(
-    *,
-    fund_tokens: tuple[str, ...],
-    text: str,
-) -> bool:
-    """Return whether the text proves the source belongs to this fund."""
+def url_identity_text(
+    source_url: str,
+) -> str:
+    """
+    Return the part of an address that may be read as identity evidence.
 
-    matched_tokens = sum(1 for token in fund_tokens if token in text)
+    The host is dropped. A manager, an administrator and a group serve
+    every fund they run from one host, so a name found there says which
+    crawl reached the page and never which fund the page is about; on
+    `onecap.cz` the host alone supplied a third of the words of both
+    funds' names. What is left - the path, the query and the fragment -
+    is where a fund-specific panel or document folder is addressed.
+    """
 
-    required_matches = (
-        1
-        if len(fund_tokens) == 1
-        else max(
-            2,
-            (len(fund_tokens) + 1) // 2,
-        )
-    )
+    parts = urlsplit(source_url)
 
-    return matched_tokens >= required_matches
+    return " ".join(part for part in (parts.path, parts.query, parts.fragment) if part)
 
 
 def fund_identity_tokens(

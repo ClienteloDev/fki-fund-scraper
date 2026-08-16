@@ -66,6 +66,9 @@ def test_runs_complete_pipeline_for_one_fund(
         <title>Example Fund</title>
       </head>
       <body>
+        <!-- The page names its fund, as the other pipeline fixtures do.
+             The host of the address may not stand in for that. -->
+        <h1>Example SICAV a.s.</h1>
         <p>Doporuceny investicni horizont je 5 let.</p>
         <p>Minimalni investice cini 1 000 000 Kc.</p>
         <p>Cilovy vynos fondu je 8 % p.a.</p>

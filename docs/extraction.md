@@ -50,6 +50,35 @@ document that names some fund but not this one is rejected rather than ranked lo
 Scope also ranks: `SCOPE_RANKS` gives exact fund 3, subfund 2, share class 1. A share-class
 value is marked `review_required` and never delivered as high confidence.
 
+### What may prove identity
+
+Exactly four things, and nothing else:
+
+1. an official ISIN of this fund printed in the source (`official_isin_scope`);
+2. the exact legal name, read where a fund name goes — immediately in front of `sicav`,
+   `investiční fond` or `podfond` (`_named_fund_matches`);
+3. the fund's own section of a page that also presents its neighbours (`fund_sections`,
+   `_section_scope`);
+4. an address whose path spells this fund out and no other — its panel or document folder
+   on a shared hub (`url_identifies_fund`).
+
+**The host of the address is not one of them.** `url_identity_text` drops it before the
+identity text is built, because a manager, an administrator and a group serve every fund
+they run from one host. Neither is the crawl assignment: which fund a page was reached for
+is a property of the run, and on a shared host every fund of the house gets the same one.
+
+The `scope` and `scope_accepted` columns that `document_metadata` writes for each parsed
+document are inventory. Nothing in extraction reads them, and a consumer that treats them
+as identity will misattribute.
+
+Until online recovery batch 01, a fifth route existed: a count of how many of the fund's
+distinctive words appeared anywhere in the title, the URL *including its host*, and the
+first 5 000 characters. Half of them was enough. On `onecap.cz`, shared by two funds, the
+host supplied `onecap` and the English marketing copy supplied `private`, `equity`, `real`,
+`estate` and `infrastructure`, so one sentence about a strategy — on a page stating no
+legal name, no ISIN and no IČO — became `target_return = 17 %` for both funds. A source
+that proves none of the four now returns `generic` and is refused.
+
 ## Vocabulary
 
 `field_definitions.py` holds the Czech and English wording each field is recognised by, and

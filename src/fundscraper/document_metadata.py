@@ -82,7 +82,6 @@ def describe_document(
     document: ParsedDocument,
     fund_name: str,
     fund_ico: str | None = None,
-    discovery_scope: str | None = None,
 ) -> DocumentFacts:
     """Answer what one parsed document is, whose it is and when it applies."""
 
@@ -112,7 +111,6 @@ def describe_document(
             title_text=title_text,
             repeated_text=repeated_text,
             body_text=body_text,
-            discovery_scope=discovery_scope,
         )
     )
 
