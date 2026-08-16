@@ -1580,13 +1580,36 @@ def fold_diacritics(
 def classify_capital_metric(
     normalized: str,
 ) -> AumMetricType | None:
-    """Return the capital figure a text names, most specific label first."""
+    """
+    Return the capital figure a text names, judged by the label nearest the value.
 
-    for metric, labels in CAPITAL_METRIC_LABELS:
-        if any(label in normalized for label in labels):
-            return metric
+    A window regularly carries two labels: the section heading above the figure
+    and the wording of the line the figure stands on. The standard annual report
+    prints "a) Základní kapitál Fondu" over "Výše fondového kapitálu: 221 913
+    tis. Kč", and reading the heading filed a genuine fund-capital figure as
+    registered capital, which may never stand in for assets.
 
-    return None
+    The label that governs a figure is the one closest in front of it, so the
+    last occurrence wins. Where two labels start at the same place the longer
+    and then the stricter one wins, which keeps the ambiguous case resolving
+    towards a refusal rather than towards a value.
+    """
+
+    best: tuple[int, int, int, AumMetricType] | None = None
+
+    for order, (metric, labels) in enumerate(CAPITAL_METRIC_LABELS):
+        for label in labels:
+            position = normalized.rfind(label)
+
+            if position < 0:
+                continue
+
+            candidate = (position, len(label), -order, metric)
+
+            if best is None or candidate[:3] > best[:3]:
+                best = candidate
+
+    return best[3] if best is not None else None
 
 
 def describes_manager_level_capital(

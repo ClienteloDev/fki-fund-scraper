@@ -317,3 +317,55 @@ def test_separates_a_news_listing_from_an_article() -> None:
     assert is_news_article_path("/aktuality/vyrocni-zprava-2024")
 
     assert not is_news_path("/dokumenty/statut.pdf")
+
+
+def test_capital_metric_follows_the_label_nearest_the_value() -> None:
+    """
+    The standard annual report puts a heading above the figure it does not name.
+
+    "a) Základní kapitál Fondu" is a section heading; the line beneath it states
+    "Výše fondového kapitálu: 221 913 tis. Kč", which is the fund's capital and a
+    legitimate assets metric. The classifier returned the first label in its own
+    declaration order, so the heading won and the figure was filed as registered
+    capital — a metric that may never stand in for assets. 14 of the 341 funds
+    lost a genuine assets figure that way.
+    """
+
+    from fundscraper.field_definitions import classify_capital_metric
+    from fundscraper.output_models import AumMetricType
+
+    normalized = normalize_search_text(
+        "a) Zakladni kapital Fondu Vyse fondoveho kapitalu: 221 913 tis. Kc "
+        "(k poslednimu dni Ucetniho obdobi)"
+    )
+
+    assert classify_capital_metric(normalized) is AumMetricType.FUND_CAPITAL
+
+
+def test_registered_capital_alone_is_still_registered_capital() -> None:
+    """The guard that keeps statutory capital out of assets must survive."""
+
+    from fundscraper.field_definitions import classify_capital_metric
+    from fundscraper.output_models import AumMetricType
+
+    normalized = normalize_search_text("Zapisovany zakladni kapital Fondu cini 2 000 000 Kc")
+
+    assert classify_capital_metric(normalized) is AumMetricType.REGISTERED_CAPITAL
+
+
+def test_a_later_stricter_label_still_wins() -> None:
+    """
+    Ambiguity resolves towards refusal, not towards a value.
+
+    When the fund-capital wording comes first and a registered-capital label
+    stands next to the figure, the stricter metric has to win.
+    """
+
+    from fundscraper.field_definitions import classify_capital_metric
+    from fundscraper.output_models import AumMetricType
+
+    normalized = normalize_search_text(
+        "Fondovy kapital Fondu je tvoren takto: zapisovany zakladni kapital 2 000 000 Kc"
+    )
+
+    assert classify_capital_metric(normalized) is AumMetricType.REGISTERED_CAPITAL
