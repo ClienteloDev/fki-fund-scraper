@@ -1,5 +1,5 @@
 """
-Phase 9 of the 8-fund crawler recovery experiment: where each value is lost.
+Where each value of a validation batch is lost.
 
 For every fund and field the sample did not deliver, this names the
 earliest stage at which the value disappeared. The stage is read from what
@@ -20,10 +20,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "src"))
 
-from sample8_baseline import DELIVERY_FIELDS, SAMPLE_FUND_NAMES  # noqa: E402
-
-SAMPLE_ROOT = REPOSITORY_ROOT / "cache/sample8-crawler-recovery"
-
+from batch_selection import DELIVERY_FIELDS, resolve  # noqa: E402
 
 # The ten stages of the funnel, in the order a value passes through them.
 STAGES = (
@@ -84,14 +81,20 @@ def stage_of(
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
-    generation = sys.argv[1] if len(sys.argv) > 1 else "before"
+    batch_name = sys.argv[1] if len(sys.argv) > 1 else "sample8"
+
+    generation = sys.argv[2] if len(sys.argv) > 2 else "before"
+
+    batch = resolve(batch_name)
 
     records = {
         str(record["name"]): record
-        for record in load(SAMPLE_ROOT / generation / "funds.enriched.json")  # type: ignore[union-attr]
+        for record in load(batch.root / generation / "funds.enriched.json")  # type: ignore[union-attr]
     }
 
-    manifest = load(REPOSITORY_ROOT / f"reports/sample8-acquisition-manifest-{generation}.json")
+    manifest = load(
+        REPOSITORY_ROOT / f"reports/{batch_name}-acquisition-manifest-{generation}.json"
+    )
 
     acquired = {
         str(row["fund_name"]): row
@@ -102,7 +105,7 @@ def main() -> int:
 
     counts: Counter[str] = Counter()
 
-    for name in SAMPLE_FUND_NAMES:
+    for name in batch.fund_names:
         record = records[name]
 
         site = acquired[name]
@@ -159,10 +162,11 @@ def main() -> int:
     by_field = Counter(str(row["field"]) for row in rows)
 
     payload = {
+        "batch": batch.name,
         "generation": generation,
-        "sample_size": len(SAMPLE_FUND_NAMES),
-        "theoretical_slots": len(SAMPLE_FUND_NAMES) * len(DELIVERY_FIELDS),
-        "delivered": len(SAMPLE_FUND_NAMES) * len(DELIVERY_FIELDS) - len(rows),
+        "sample_size": len(batch.fund_names),
+        "theoretical_slots": len(batch.fund_names) * len(DELIVERY_FIELDS),
+        "delivered": len(batch.fund_names) * len(DELIVERY_FIELDS) - len(rows),
         "lost": len(rows),
         "by_stage": {stage: counts.get(stage, 0) for stage in STAGES},
         "by_fund": dict(by_fund.most_common()),
@@ -170,13 +174,13 @@ def main() -> int:
         "losses": rows,
     }
 
-    (REPOSITORY_ROOT / f"reports/sample8-loss-analysis-{generation}.json").write_text(
+    (REPOSITORY_ROOT / f"reports/{batch_name}-loss-analysis-{generation}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
     lines = [
-        f"# Sample 8 — where each value is lost ({generation})",
+        f"# {batch.name} — where each value is lost ({generation})",
         "",
         f"Slots {payload['theoretical_slots']} · delivered {payload['delivered']} · "
         f"lost {payload['lost']}",
@@ -190,17 +194,17 @@ def main() -> int:
     for stage in STAGES:
         lines.append(f"| {stage} | {counts.get(stage, 0)} |")
 
-    lines.extend(["", "## By field", "", "| field | lost of 8 |", "|---|---:|"])
+    lines.extend(["", "## By field", "", "| field | lost |", "|---|---:|"])
 
     for field in DELIVERY_FIELDS:
         lines.append(f"| {field} | {by_field.get(field, 0)} |")
 
     lines.extend(["", "## By fund", "", "| fund | lost of 11 |", "|---|---:|"])
 
-    for name in SAMPLE_FUND_NAMES:
+    for name in batch.fund_names:
         lines.append(f"| {name} | {by_fund.get(name, 0)} |")
 
-    (REPOSITORY_ROOT / f"reports/sample8-loss-analysis-{generation}.md").write_text(
+    (REPOSITORY_ROOT / f"reports/{batch_name}-loss-analysis-{generation}.md").write_text(
         "\n".join(lines) + "\n",
         encoding="utf-8",
     )

@@ -1,7 +1,7 @@
 """
 Phases 4 and 9 of the 8-fund crawler recovery experiment.
 
-Reads one isolated sample run and writes the acquisition manifest - every
+Reads one isolated batch run and writes the acquisition manifest - every
 source the crawler acquired, with where it came from - and the navigation
 picture behind it: what the discovery saw, what it followed, and what it
 refused and why.
@@ -23,13 +23,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "src"))
 
-from sample8_baseline import SAMPLE_FUND_NAMES  # noqa: E402
+from batch_selection import resolve  # noqa: E402
 
 from fundscraper.input_loader import load_funds  # noqa: E402
 from fundscraper.output_service import stable_fund_id  # noqa: E402
-
-SAMPLE_ROOT = REPOSITORY_ROOT / "cache/sample8-crawler-recovery"
-
 
 # Wording that makes a page worth an investor's attention. Used only to
 # describe what was acquired; nothing here reads a business value.
@@ -97,8 +94,14 @@ def signals_of(text: str) -> list[str]:
     return [signal for signal in RELEVANCE_SIGNALS if signal in lowered]
 
 
-def build(generation: str) -> dict[str, object]:
-    database_path = SAMPLE_ROOT / generation / "sample8.sqlite3"
+def build(batch_name: str, generation: str) -> dict[str, object]:
+    batch = resolve(batch_name)
+
+    database_path = (
+        batch.root
+        / generation
+        / ("sample8.sqlite3" if batch.name == "sample8" else "batch.sqlite3")
+    )
 
     connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
 
@@ -108,7 +111,7 @@ def build(generation: str) -> dict[str, object]:
 
     fund_rows: list[dict[str, object]] = []
 
-    for name in SAMPLE_FUND_NAMES:
+    for name in batch.fund_names:
         fund = by_name[name]
 
         fund_id = stable_fund_id(fund)
@@ -212,9 +215,7 @@ def build(generation: str) -> dict[str, object]:
         # worth a human's attention: the crawler saw the link and did not
         # take it.
         relevant_refusals = [
-            item
-            for item in refused
-            if item["relevance_signals"] and not item["is_document"]
+            item for item in refused if item["relevance_signals"] and not item["is_document"]
         ]
 
         fund_rows.append(
@@ -242,6 +243,7 @@ def build(generation: str) -> dict[str, object]:
     connection.close()
 
     return {
+        "batch": batch.name,
         "generation": generation,
         "database": str(database_path.relative_to(REPOSITORY_ROOT)).replace("\\", "/"),
         "sources_total": sum(int(row["sources_acquired"]) for row in fund_rows),
@@ -250,11 +252,15 @@ def build(generation: str) -> dict[str, object]:
 
 
 def main() -> int:
-    generation = sys.argv[1] if len(sys.argv) > 1 else "before"
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
-    payload = build(generation)
+    batch_name = sys.argv[1] if len(sys.argv) > 1 else "sample8"
 
-    path = REPOSITORY_ROOT / f"reports/sample8-acquisition-manifest-{generation}.json"
+    generation = sys.argv[2] if len(sys.argv) > 2 else "before"
+
+    payload = build(batch_name, generation)
+
+    path = REPOSITORY_ROOT / f"reports/{batch_name}-acquisition-manifest-{generation}.json"
 
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",

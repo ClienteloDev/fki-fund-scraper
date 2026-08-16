@@ -79,8 +79,7 @@ def main() -> int:
     stale_path = REPOSITORY_ROOT / "data/output/funds.delivery.safe.json"
 
     stale_by_name = {
-        record["name"]: record
-        for record in json.loads(stale_path.read_text(encoding="utf-8"))
+        record["name"]: record for record in json.loads(stale_path.read_text(encoding="utf-8"))
     }
 
     connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)

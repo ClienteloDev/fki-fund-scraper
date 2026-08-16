@@ -169,9 +169,7 @@ def main() -> int:
                 "own_site_deterministic_after": len(usable_after),
                 "gained": sorted(set(usable_after) - set(usable_before)),
                 "lost": sorted(set(usable_before) - set(usable_after)),
-                "still_missing": [
-                    field for field in DELIVERY_FIELDS if field not in usable_after
-                ],
+                "still_missing": [field for field in DELIVERY_FIELDS if field not in usable_after],
                 "field_tier_before": before,
                 "field_tier_after": after,
                 "evidence_after": {
@@ -190,10 +188,14 @@ def main() -> int:
     by_field = {
         field: {
             "before": sum(
-                1 for row in funds_report if row["field_tier_before"][field] != "MISSING"  # type: ignore[index]
+                1
+                for row in funds_report
+                if row["field_tier_before"][field] != "MISSING"  # type: ignore[index]
             ),
             "after": sum(
-                1 for row in funds_report if row["field_tier_after"][field] != "MISSING"  # type: ignore[index]
+                1
+                for row in funds_report
+                if row["field_tier_after"][field] != "MISSING"  # type: ignore[index]
             ),
         }
         for field in DELIVERY_FIELDS
