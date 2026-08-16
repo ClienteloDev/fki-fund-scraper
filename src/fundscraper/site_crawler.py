@@ -61,6 +61,8 @@ NAVIGATION_KEYWORDS = (
     "our funds",
     "pro investory",
     "for investors",
+    "povinne informace",
+    "informacni povinnost",
 )
 
 
