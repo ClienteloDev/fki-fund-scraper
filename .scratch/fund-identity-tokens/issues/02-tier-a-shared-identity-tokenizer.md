@@ -1,6 +1,6 @@
 # 02 — One identity tokenizer for Tier A
 
-Status: done
+Status: ready-for-human
 Spec: `../spec.md`
 Type: task
 Blocked by: 01
@@ -154,13 +154,34 @@ directly, which is stronger than an ablation delta and does not depend on the lo
 
 ### Acceptance gate
 
-Baseline captured against `data/output/funds.delivery.current-enriched.json` (341 funds).
-The 341-fund offline re-extraction into `cache/fund-identity-tokens/extraction.jsonl` is
-running offline against `cache/regen.sqlite3`, no `--force`, nothing fetched. Observed rate is
-roughly 60 s per fund rather than the estimated 15–25 s, so budget ~6 hours; the delta is
-outstanding at the time of the commit. **The gate covers 01 and 02 together**, and 01 is
-already committed, so what remains to be reviewed is 01's SICAV gains — 02's own contribution
-is settled by the mechanical result above.
+**Steps 1 and 2 complete; step 3 stopped part-way and the gate is NOT satisfied.**
+
+1. Baseline captured against `data/output/funds.delivery.current-enriched.json` (341 funds).
+2. Re-extraction complete: all **341** funds into `cache/fund-identity-tokens/extraction.jsonl`,
+   341 records / 341 unique names, clean stderr, `finished in 6571.7s`. Offline against
+   `cache/regen.sqlite3`, no `--force`, nothing fetched. Measured rate was **24.8 s mean /
+   20.8 s median** per fund — the issue's 15–25 s estimate is right. (An earlier note here
+   claiming ~60 s/fund was extrapolated from a 2-fund sample and was wrong.)
+3. `offline_delta.py` **stopped by the operator at 44 of 208 funds** with candidates, to move
+   on to issue 03. It writes its report only on completion, so
+   `reports/fund-identity-tokens-delta.json` does not exist and **no delta was reviewed**.
+   Attribution costs one re-extraction per ablation per fund and was running at roughly
+   67 s/fund, i.e. ~3.5 h more.
+
+What that leaves outstanding is **01's** SICAV gains, not 02's. The gate covers both commits,
+01 is already committed, and 02's own contribution is settled independently by the mechanical
+result above — set-equality of the token list against both pre-move copies plus 0/341 token
+differences. None of the gate's blocking criteria can be evaluated from a partial run, so if
+this feature needs a signed-off gate, re-run step 3 alone; step 2's output is complete on disk
+and does not need repeating.
+
+### Re-extraction survives being killed
+
+Incidental but worth recording, because the gate depends on it. The run was interrupted twice
+by the harness reaping background tasks (at 61 and 72 funds) before being relaunched as a
+detached OS process. `--resume` recovered cleanly each time: the output is append-only JSONL,
+the last record was valid JSON on both occasions, and the finished file has 341 records with
+341 unique fund names — no duplicates and no half-written funds across the three segments.
 
 ### Verification
 
