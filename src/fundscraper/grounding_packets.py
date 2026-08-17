@@ -248,6 +248,12 @@ FUND_NAME_NOISE_TOKENS: Final = frozenset(
         "otevreny",
         "uzavreny",
         "promennym",
+        # "s proměnným základním kapitálem" is the legal form of a SICAV,
+        # written out in the registered name of 29 of the canonical funds.
+        # None of its three words tells one fund from another, so a snippet
+        # from a document about any other SICAV would otherwise earn identity
+        # credit for this fund.
+        "zakladnim",
         "kapitalem",
     }
 )
