@@ -47,6 +47,10 @@ from fundscraper.field_definitions import (
     states_benchmark_linked_return,
     states_no_published_return,
 )
+from fundscraper.fund_identity import (
+    FUND_NAME_NOISE_TOKENS,
+    fund_identity_tokens,
+)
 from fundscraper.html_discovery import normalize_search_text
 from fundscraper.output_models import (
     AssetsUnderManagementValue,
@@ -792,37 +796,6 @@ SCOPE_MISMATCH_KEYWORDS: Final[tuple[str, ...]] = (
     "group manages",
     "assets under management of the group",
     "total assets under management",
-)
-
-
-FUND_NAME_NOISE_TOKENS: Final[frozenset[str]] = frozenset(
-    {
-        "a",
-        "as",
-        "s",
-        "sicav",
-        "fond",
-        "fund",
-        "fonds",
-        "investicni",
-        "investment",
-        "spolecnost",
-        "podfond",
-        "subfund",
-        "otevreny",
-        "uzavreny",
-        "promennym",
-        # "s proměnným základním kapitálem" is the legal form of a SICAV,
-        # written out in the registered name of 29 of the canonical funds.
-        # None of its three words tells one fund from another, and a
-        # mention is only read as far as its "investiční fond" head, so a
-        # token standing behind that head can never appear in one. Left
-        # in, it made those funds unable to match their own legal name -
-        # on their own homepage the name then read as a foreign fund and
-        # every value on the page was refused.
-        "zakladnim",
-        "kapitalem",
-    }
 )
 
 
@@ -3571,31 +3544,6 @@ def url_identity_text(
     parts = urlsplit(source_url)
 
     return " ".join(part for part in (parts.path, parts.query, parts.fragment) if part)
-
-
-def fund_identity_tokens(
-    fund_name: str,
-) -> tuple[str, ...]:
-    normalized = normalize_search_text(fund_name)
-
-    raw_tokens = re.findall(
-        r"[a-z0-9]+",
-        normalized,
-    )
-
-    result: list[str] = []
-
-    for token in raw_tokens:
-        if token in FUND_NAME_NOISE_TOKENS:
-            continue
-
-        if len(token) < 2:
-            continue
-
-        if token not in result:
-            result.append(token)
-
-    return tuple(result)
 
 
 SCOPE_RANKS: Final[dict[SourceScope, int]] = {

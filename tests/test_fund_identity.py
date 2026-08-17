@@ -3,15 +3,15 @@
 `field_extraction.py` and `grounding_packets.py` each answer "which words of this
 fund's registered name identify it". The two kept separate copies of the noise
 list, and the SICAV fix - dropping "zakladnim" from the legal form
-"s promennym zakladnim kapitalem" - reached only the primary parser. These tests
-pin both consumers to one answer.
+"s promennym zakladnim kapitalem" - reached only the primary parser. Both now
+read `fundscraper.fund_identity`; these tests pin that one answer, and the
+grounded case below pins that the review path really goes through it.
 
 Fund names are verbatim from `data/input/funds.json`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,10 +35,11 @@ from fundscraper.fallback_sources import (
 )
 from fundscraper.field_extraction import (
     extract_fund_fields,
+)
+from fundscraper.fund_identity import (
     fund_identity_tokens,
 )
 from fundscraper.grounding_packets import (
-    _fund_identity_tokens,
     build_grounding_packets,
 )
 from fundscraper.models import FundInput
@@ -84,27 +85,9 @@ RUN_TIME = datetime(
     tzinfo=UTC,
 )
 
-IDENTITY_TOKENIZERS: tuple[tuple[str, Callable[[str], tuple[str, ...]]], ...] = (
-    (
-        "field_extraction",
-        fund_identity_tokens,
-    ),
-    (
-        "grounding_packets",
-        _fund_identity_tokens,
-    ),
-)
 
-
-@pytest.mark.parametrize(
-    "tokenize",
-    [tokenize for _, tokenize in IDENTITY_TOKENIZERS],
-    ids=[name for name, _ in IDENTITY_TOKENIZERS],
-)
-def test_sicav_legal_form_contributes_no_identity_token(
-    tokenize: Callable[[str], tuple[str, ...]],
-) -> None:
-    assert tokenize(SICAV_FUND_NAME) == ("nemomax",)
+def test_sicav_legal_form_contributes_no_identity_token() -> None:
+    assert fund_identity_tokens(SICAV_FUND_NAME) == ("nemomax",)
 
 
 @pytest.mark.parametrize(
@@ -115,18 +98,12 @@ def test_sicav_legal_form_contributes_no_identity_token(
     SHORT_FUND_NAMES,
     ids=[fund_name for fund_name, _ in SHORT_FUND_NAMES],
 )
-@pytest.mark.parametrize(
-    "tokenize",
-    [tokenize for _, tokenize in IDENTITY_TOKENIZERS],
-    ids=[name for name, _ in IDENTITY_TOKENIZERS],
-)
 def test_short_fund_name_keeps_its_only_distinctive_token(
-    tokenize: Callable[[str], tuple[str, ...]],
     fund_name: str,
     expected: tuple[str, ...],
 ) -> None:
     """The other side of the rule: noise stripping must not empty a fund out."""
-    assert tokenize(fund_name) == expected
+    assert fund_identity_tokens(fund_name) == expected
 
 
 def test_grounded_snippet_earns_no_identity_credit_from_the_shared_legal_form(

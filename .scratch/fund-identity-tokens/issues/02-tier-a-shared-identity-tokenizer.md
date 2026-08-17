@@ -1,6 +1,6 @@
 # 02 — One identity tokenizer for Tier A
 
-Status: ready-for-agent
+Status: done
 Spec: `../spec.md`
 Type: task
 Blocked by: 01
@@ -101,6 +101,94 @@ are separated mechanically.
 - offline delta reviewed against the criteria above and recorded in `## Comments`
 
 ## Comments
+
+### The re-export assumption in the spec is false under this repo's mypy config
+
+The spec and this issue both state that `from … import fund_identity_tokens` re-binds the name
+into `field_extraction`'s namespace, so `from fundscraper.field_extraction import
+fund_identity_tokens` keeps resolving and *"No test import needs editing."* True at runtime,
+false under type checking: `pyproject.toml:72` sets `strict = true`, which implies
+`no_implicit_reexport`. The move produced three `attr-defined` errors.
+
+Resolved by repointing the three sites at the canonical module rather than adding an
+`as`-alias re-export — an alias would preserve a second import path for the one symbol this
+issue exists to unify, and the issue forbids a shim. Three sites is exactly the error count:
+
+- `src/fundscraper/extended_extraction.py:91` (not listed in the spec's consumer table; it is a
+  fourth reader of the tokenizer that the Tier A survey did not record)
+- `tests/test_source_scope.py:528`, `:580`
+
+### The move silently disarmed the ablation harness the acceptance gate runs on
+
+Not anticipated by the spec, and the one edit outside the planned files.
+
+`scripts/batch_ablation.py:132` ablates this exact fix by rebinding
+`fe.FUND_NAME_NOISE_TOKENS`, and `scripts/offline_delta.py:46` imports that `_disabled`
+context manager — it is the mechanism behind the gate's *"SICAV gains are separated
+mechanically, not by judgement."*
+
+Before the move the tokenizer lived in `field_extraction` and read that module global, so one
+rebinding covered everything. After it, `fund_identity_tokens` closes over
+`fund_identity`'s global and ignores the patch; only the two direct reads at
+`field_extraction.py:3352` and `:3508` still respond. The script would have kept running and
+kept reporting a number — a wrong one, crediting the boilerplate token with less than it
+earned and pushing the difference into manual review as unattributed.
+
+`mypy` covers `src` and `tests` only, so nothing flagged it. Fixed by rebinding both names,
+which reproduces the pre-move behaviour exactly; verified that
+`fund_identity_tokens("Nemomax …")` returns `("nemomax", "zakladnim")` inside the context
+manager and `("nemomax",)` outside it.
+
+### 02 in isolation moves nothing — shown mechanically rather than by delta
+
+The issue asks for proof that the pure code move changes no field. That was established
+directly, which is stronger than an ablation delta and does not depend on the long run:
+
+- the shipped `FUND_NAME_NOISE_TOKENS` is set-equal to **both** pre-move copies at `9615109`
+  (17 tokens, symmetric difference empty) — so the move is data-neutral by construction
+- tokenizing all **341** canonical names with the pre-move implementation and the shared one
+  gives **0** names whose tokens differ
+- **0** funds tokenize to `()`, so no fund lost its identity
+- the two guard-rail funds hold: `Český fond SICAV, a.s.` → `("cesky",)` and
+  `Czech Investment Fund SICAV, a.s.` → `("czech",)`
+
+### Acceptance gate
+
+Baseline captured against `data/output/funds.delivery.current-enriched.json` (341 funds).
+The 341-fund offline re-extraction into `cache/fund-identity-tokens/extraction.jsonl` is
+running offline against `cache/regen.sqlite3`, no `--force`, nothing fetched. Observed rate is
+roughly 60 s per fund rather than the estimated 15–25 s, so budget ~6 hours; the delta is
+outstanding at the time of the commit. **The gate covers 01 and 02 together**, and 01 is
+already committed, so what remains to be reviewed is 01's SICAV gains — 02's own contribution
+is settled by the mechanical result above.
+
+### Verification
+
+```
+uv run pytest -q                        784 passed
+uv run mypy                             no issues in 127 source files
+uv run ruff check src tests             all checks passed
+uv run ruff format --check src tests    127 files already formatted
+```
+
+`uv run ruff check src tests scripts` reports the same **66** pre-existing errors as at 01,
+all in `scripts/recovery/`, none in `scripts/batch_ablation.py`. No network, no `--force`,
+nothing written to the production cache.
+
+The test count fell 785 → 784 because the degenerate half of a parametrization went away: the
+tokenizer table in `tests/test_fund_identity.py` had two entries that became the same function
+object once the second implementation was deleted. Assertions and their expected values are
+unchanged, as the spec requires; the grounded path stays covered end-to-end by
+`test_grounded_snippet_earns_no_identity_credit_from_the_shared_legal_form`.
+
+### Declined: extracting the token predicate
+
+`field_extraction.py:3352` and `:3508` still spell `word not in FUND_NAME_NOISE_TOKENS and
+len(word) >= 2` inline, duplicating the tokenizer's filter. Raised in review as incomplete
+extraction; not done, because the issue names this precisely and accepts it — *"They keep
+working unchanged once the name is imported — this is the whole cost of the move."* Folding
+those two call sites into a shared predicate is a behaviour-bearing edit to scope-adjacent
+code inside a commit whose value is being provably inert.
 
 ### Carried over from issue 01's code review
 

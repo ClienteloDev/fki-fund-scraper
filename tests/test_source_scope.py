@@ -525,7 +525,8 @@ def test_owning_the_page_still_rejects_a_neighbouring_fund_section() -> None:
 def test_similar_subfund_slug_does_not_grant_ownership() -> None:
     """ "esg-seniorcare" and "alca-podfond-caresort" are not CARE SICAV."""
 
-    from fundscraper.field_extraction import fund_identity_tokens, url_identifies_fund
+    from fundscraper.field_extraction import url_identifies_fund
+    from fundscraper.fund_identity import fund_identity_tokens
 
     tokens = fund_identity_tokens("CARE SICAV, a.s.")
 
@@ -577,7 +578,7 @@ def test_legal_form_boilerplate_is_not_an_identity_token() -> None:
     341 canonical funds unable to match their own name.
     """
 
-    from fundscraper.field_extraction import fund_identity_tokens
+    from fundscraper.fund_identity import fund_identity_tokens
 
     assert fund_identity_tokens(
         "Nemomax investiční fond s proměnným základním kapitálem, a.s."

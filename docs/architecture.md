@@ -16,7 +16,7 @@ parsing        document_parser.py, table_extraction.py, document_classification.
                document_identity.py, document_dates.py, document_metadata.py,
                anydoc_parser.py, anydoc_fallback.py, document_service.py
 extraction     field_extraction.py, extended_extraction.py, field_definitions.py,
-               extraction_service.py, extended_persistence.py
+               fund_identity.py, extraction_service.py, extended_persistence.py
 decisions      extended_validation.py, conflict_resolution.py, crawl_planning.py
 orchestration  pipeline_service.py, two_pass_service.py
 delivery       output_models.py, output_service.py, output_audit.py, database.py
@@ -24,7 +24,7 @@ delivery       output_models.py, output_service.py, output_audit.py, database.py
 
 ## The rule of one vocabulary
 
-Two modules are deliberately the only place their kind of decision is made, and everything
+Three modules are deliberately the only place their kind of decision is made, and everything
 else consumes them:
 
 - **`extended_validation.py`** holds `ValidationCode` (the reason-code vocabulary),
@@ -36,6 +36,22 @@ else consumes them:
 - **`conflict_resolution.py`** holds the deterministic comparison of two candidates that
   claim the same thing, plus the value normalization used to decide whether they disagree
   at all. Both `field_extraction.py` and `extended_extraction.py` route through it.
+- **`fund_identity.py`** answers "which words of a fund's registered name identify *that*
+  fund": `FUND_NAME_NOISE_TOKENS` and `fund_identity_tokens`. `field_extraction.py`,
+  `extended_extraction.py` and `grounding_packets.py` all read it. It is a leaf — its only
+  dependency is `html_discovery.normalize_search_text`. The primary parser and the grounded
+  review path each used to keep a private copy, and they drifted: the SICAV legal form
+  *"s proměnným základním kapitálem"* was noise in one and identity in the other, so 29
+  funds were refused their own legal name on one path while another SICAV's document earned
+  identity credit on the other.
+
+  This is **not** a general noise list, and it must not absorb the ones in
+  `discovery_priority.py`, `site_crawler.py`, `field_definitions.py` or the
+  `entity_key` family in `domain_adapters/`. Those answer different questions — link
+  ranking, company-name detection, hostname guessing — and treat `cesky`/`czech` as noise,
+  which is correct there and fatal here: `Český fond SICAV, a.s.` and `Czech Investment
+  Fund SICAV, a.s.` are two real funds whose entire distinctive content is exactly those
+  tokens. Merging the lists reduces both to no identity at all.
 
 ## State
 

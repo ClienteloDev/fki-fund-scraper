@@ -26,6 +26,9 @@ from fundscraper.document_parser import (
 from fundscraper.fallback_sources import (
     FallbackField,
 )
+from fundscraper.fund_identity import (
+    fund_identity_tokens,
+)
 from fundscraper.html_discovery import (
     normalize_search_text,
 )
@@ -229,34 +232,6 @@ DOCUMENT_PRIORITY: Final[
         DocumentType.MARKETING_PAGE: 30,
     },
 }
-
-
-FUND_NAME_NOISE_TOKENS: Final = frozenset(
-    {
-        "a",
-        "as",
-        "s",
-        "sicav",
-        "fond",
-        "fund",
-        "fonds",
-        "investicni",
-        "investment",
-        "spolecnost",
-        "podfond",
-        "subfund",
-        "otevreny",
-        "uzavreny",
-        "promennym",
-        # "s proměnným základním kapitálem" is the legal form of a SICAV,
-        # written out in the registered name of 29 of the canonical funds.
-        # None of its three words tells one fund from another, so a snippet
-        # from a document about any other SICAV would otherwise earn identity
-        # credit for this fund.
-        "zakladnim",
-        "kapitalem",
-    }
-)
 
 
 SCOPE_WARNING_PHRASES: Final = (
@@ -520,7 +495,7 @@ def _collect_field_snippets(
         ]
     ] = set()
 
-    fund_tokens = _fund_identity_tokens(fund_name)
+    fund_tokens = fund_identity_tokens(fund_name)
 
     keywords = FIELD_KEYWORDS[field]
 
@@ -803,31 +778,6 @@ def _field_instructions(
         *common,
         specific,
     ]
-
-
-def _fund_identity_tokens(
-    fund_name: str,
-) -> tuple[str, ...]:
-    normalized = normalize_search_text(fund_name)
-
-    tokens = re.findall(
-        r"[a-z0-9]+",
-        normalized,
-    )
-
-    result: list[str] = []
-
-    for token in tokens:
-        if token in FUND_NAME_NOISE_TOKENS:
-            continue
-
-        if len(token) < 2:
-            continue
-
-        if token not in result:
-            result.append(token)
-
-    return tuple(result)
 
 
 def _document_type(

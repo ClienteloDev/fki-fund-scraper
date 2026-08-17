@@ -88,7 +88,6 @@ from fundscraper.field_extraction import (
     declared_multiplier,
     document_priority,
     extract_date,
-    fund_identity_tokens,
     missing_result,
     normalize_currency,
     normalized_document_lines,
@@ -97,6 +96,9 @@ from fundscraper.field_extraction import (
     resolve_document_type,
     safe_date,
     source_datetime,
+)
+from fundscraper.fund_identity import (
+    fund_identity_tokens,
 )
 from fundscraper.html_discovery import decode_html_bytes, normalize_search_text
 from fundscraper.normalization import canonical_domain

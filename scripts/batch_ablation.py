@@ -40,6 +40,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "src"))
 from batch_selection import DELIVERY_FIELDS, resolve  # noqa: E402
 
 import fundscraper.field_extraction as fe  # noqa: E402
+import fundscraper.fund_identity as fund_identity  # noqa: E402
 from fundscraper.database import ParsedDocumentRecord  # noqa: E402
 from fundscraper.document_parser import DocumentFormat, load_parsed_document  # noqa: E402
 from fundscraper.extended_extraction import extract_extended_fields  # noqa: E402
@@ -129,13 +130,23 @@ def _disabled(fix: str | None) -> Iterator[None]:
     """Put one fix back the way it was, for the duration of one extraction."""
 
     if fix == "1_identity_boilerplate_token":
-        original = fe.FUND_NAME_NOISE_TOKENS
+        # The list lives in ``fundscraper.fund_identity``; ``field_extraction``
+        # binds its own name to the same frozenset on import. The tokenizer
+        # reads the first, ``iter_named_funds`` and ``_named_fund_matches``
+        # read the second, so ablating the token means rebinding both.
+        original = fund_identity.FUND_NAME_NOISE_TOKENS
 
-        fe.FUND_NAME_NOISE_TOKENS = frozenset(original - {"zakladnim"})
+        ablated = frozenset(original - {"zakladnim"})
+
+        fund_identity.FUND_NAME_NOISE_TOKENS = ablated
+
+        fe.FUND_NAME_NOISE_TOKENS = ablated
 
         try:
             yield
         finally:
+            fund_identity.FUND_NAME_NOISE_TOKENS = original
+
             fe.FUND_NAME_NOISE_TOKENS = original
 
         return
